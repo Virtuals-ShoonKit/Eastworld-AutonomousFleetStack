@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import signal
+import threading
 from pathlib import Path
 
 import gi
@@ -247,11 +248,17 @@ class ZedWebRTCStreamer:
         log.info("Connecting to signaling server: %s", url)
         async for ws in websockets.connect(url, ping_interval=10, ping_timeout=30):
             offer_retry_task: asyncio.Task | None = None
+            # #region agent log
+            monitor_task: asyncio.Task | None = None
+            # #endregion
             try:
                 self.ws = ws
                 log.info("Signaling connected")
                 self.start_pipeline()
                 offer_retry_task = asyncio.create_task(self._retry_offer_until_answer())
+                # #region agent log
+                monitor_task = asyncio.create_task(self._monitor_webrtc_state())
+                # #endregion
                 async for raw in ws:
                     msg = json.loads(raw)
                     self._dispatch_signaling(msg)
@@ -264,6 +271,10 @@ class ZedWebRTCStreamer:
             finally:
                 if offer_retry_task:
                     offer_retry_task.cancel()
+                # #region agent log
+                if monitor_task:
+                    monitor_task.cancel()
+                # #endregion
                 self.stop_pipeline()
                 self.ws = None
 
@@ -308,6 +319,24 @@ class ZedWebRTCStreamer:
             else:
                 self._request_offer("retry-no-answer")
 
+    # #region agent log
+    async def _monitor_webrtc_state(self):
+        """Periodically log webrtcbin and pipeline state for diagnostics."""
+        await asyncio.sleep(1.0)
+        for _ in range(20):
+            if not self.webrtcbin or not self.pipeline:
+                break
+            try:
+                ice = self.webrtcbin.get_property("ice-connection-state")
+                conn = self.webrtcbin.get_property("connection-state")
+                _, state, pending = self.pipeline.get_state(0)
+                log.info("Monitor: ice=%s conn=%s pipeline=%s pending=%s answer=%s",
+                         ice, conn, state, pending, self._answer_received)
+            except Exception as e:
+                log.warning("Monitor error: %s", e)
+            await asyncio.sleep(3.0)
+    # #endregion
+
     # -- lifecycle ----------------------------------------------------------
 
     async def run(self):
@@ -342,6 +371,12 @@ def main():
     )
     args = parse_args()
     Gst.init(None)
+
+    glib_loop = GLib.MainLoop()
+    glib_thread = threading.Thread(target=glib_loop.run, daemon=True, name="glib-mainloop")
+    glib_thread.start()
+    log.info("GLib main loop thread started")
+
     has_zedsrc = Gst.ElementFactory.find("zedsrc") is not None
     has_webrtcbin = Gst.ElementFactory.find("webrtcbin") is not None
     has_nice_plugin = Gst.Registry.get().find_plugin("nice") is not None
