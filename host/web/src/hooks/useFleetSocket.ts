@@ -115,7 +115,10 @@ export function useFleetSocket(url: string) {
         if (prev.size === 0) return prev;
         const next = new Map<string, RobotState>();
         for (const [id, robot] of prev.entries()) {
-          if (robot.lastUpdateMs >= cutoff) {
+          // Keep robots that are marked connected from fleet_state even if
+          // pose/cloud updates are currently sparse, otherwise video panels
+          // unmount and close WebRTC signaling sessions.
+          if (robot.connected || robot.lastUpdateMs >= cutoff) {
             next.set(id, robot);
           }
         }
