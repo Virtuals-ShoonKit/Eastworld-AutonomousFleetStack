@@ -139,6 +139,15 @@ class ZedWebRTCStreamer:
         self.webrtcbin.connect("on-ice-candidate", self._on_ice_candidate)
         self.webrtcbin.connect("pad-added", self._on_pad_added)
 
+        # #region agent log
+        self._sink_buf_count = 0
+        for pad in self.webrtcbin.sinkpads:
+            pad.add_probe(Gst.PadProbeType.BUFFER, self._sink_probe_cb, None)
+            log.info("Probe added on webrtcbin pad: %s (direction=%s)", pad.get_name(), pad.get_direction())
+        if not self.webrtcbin.sinkpads:
+            log.warning("webrtcbin has NO sink pads after parse_launch!")
+        # #endregion
+
     def _request_offer(self, reason: str):
         if not self.webrtcbin:
             return
@@ -190,6 +199,27 @@ class ZedWebRTCStreamer:
             self._loop,
         )
 
+    # #region agent log
+    def _sink_probe_cb(self, pad, info, data):
+        self._sink_buf_count += 1
+        if self._sink_buf_count <= 3 or self._sink_buf_count % 300 == 0:
+            log.info("webrtcbin sink probe: buffer #%d", self._sink_buf_count)
+        return Gst.PadProbeReturn.OK
+    # #endregion
+
+    # #region agent log
+    def _on_bus_error(self, _bus, msg):
+        err, dbg = msg.parse_error()
+        log.error("BUS ERROR from %s: %s (%s)", msg.src.get_name() if msg.src else "?", err, dbg)
+
+    def _on_bus_warning(self, _bus, msg):
+        warn, dbg = msg.parse_warning()
+        log.warning("BUS WARNING from %s: %s (%s)", msg.src.get_name() if msg.src else "?", warn, dbg)
+
+    def _on_bus_eos(self, _bus, _msg):
+        log.warning("BUS EOS received!")
+    # #endregion
+
     def _on_pad_added(self, _webrtc, pad):
         log.debug("Pad added: %s", pad.get_name())
 
@@ -227,6 +257,13 @@ class ZedWebRTCStreamer:
                 raise RuntimeError(f"Camera start failure: {camera_error_text}")
             raise RuntimeError("Failed to start GStreamer pipeline")
         log.info("Pipeline PLAYING")
+        # #region agent log
+        bus = self.pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::error", self._on_bus_error)
+        bus.connect("message::warning", self._on_bus_warning)
+        bus.connect("message::eos", self._on_bus_eos)
+        # #endregion
         self._request_offer("pipeline-start")
 
     def stop_pipeline(self):
@@ -330,8 +367,9 @@ class ZedWebRTCStreamer:
                 ice = self.webrtcbin.get_property("ice-connection-state")
                 conn = self.webrtcbin.get_property("connection-state")
                 _, state, pending = self.pipeline.get_state(0)
-                log.info("Monitor: ice=%s conn=%s pipeline=%s pending=%s answer=%s",
-                         ice, conn, state, pending, self._answer_received)
+                log.info("Monitor: ice=%s conn=%s pipeline=%s pending=%s answer=%s bufs=%d",
+                         ice, conn, state, pending, self._answer_received,
+                         getattr(self, '_sink_buf_count', 0))
             except Exception as e:
                 log.warning("Monitor error: %s", e)
             await asyncio.sleep(3.0)
