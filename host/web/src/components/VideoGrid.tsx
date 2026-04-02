@@ -6,7 +6,7 @@ interface Props {
 }
 
 function VideoPanel({ robotId, signalingUrl }: { robotId: string; signalingUrl: string }) {
-  const { videoRef, connected } = useRobotWebRTC(robotId, signalingUrl);
+  const { videoRef, connected, debugInfo } = useRobotWebRTC(robotId, signalingUrl);
 
   return (
     <div style={{
@@ -43,6 +43,23 @@ function VideoPanel({ robotId, signalingUrl }: { robotId: string; signalingUrl: 
           verticalAlign: "middle",
         }} />
       </div>
+      {/* #region agent log */}
+      <div style={{
+        position: "absolute",
+        bottom: 2,
+        left: 4,
+        right: 4,
+        fontSize: 9,
+        fontFamily: "monospace",
+        color: "#0f0",
+        background: "rgba(0,0,0,0.7)",
+        padding: "2px 4px",
+        wordBreak: "break-all",
+        pointerEvents: "none",
+      }}>
+        {debugInfo}
+      </div>
+      {/* #endregion */}
     </div>
   );
 }
@@ -50,11 +67,14 @@ function VideoPanel({ robotId, signalingUrl }: { robotId: string; signalingUrl: 
 export function VideoGrid({ robotIds, signalingUrl }: Props) {
   const count = robotIds.length;
   const cols = count <= 1 ? 1 : count <= 4 ? 2 : 3;
+  const rows = Math.max(1, Math.ceil(count / cols));
 
   return (
     <div style={{
       display: "grid",
       gridTemplateColumns: `repeat(${cols}, 1fr)`,
+      gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+      gridAutoRows: "minmax(0, 1fr)",
       gap: 4,
       height: "100%",
       padding: 4,

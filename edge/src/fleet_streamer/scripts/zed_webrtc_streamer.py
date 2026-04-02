@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import logging
+import re
 import signal
 from pathlib import Path
 
@@ -30,6 +31,27 @@ import websockets  # noqa: E402
 import yaml  # noqa: E402
 
 log = logging.getLogger("zed_webrtc")
+
+
+_H264_FMTP = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
+
+
+def _inject_h264_fmtp(sdp: str) -> str:
+    """Ensure the SDP offer includes a=fmtp for H264 payload 96.
+
+    GStreamer's webrtcbin omits the fmtp line, which causes Chrome to
+    default to packetization-mode=0.  The robot's rtph264pay sends
+    mode 1 (aggregate-mode=zero-latency), so we must advertise it.
+    Injecting here (before set-local-description) keeps the local
+    description consistent with what the viewer sees.
+    """
+    if "a=fmtp:96" in sdp:
+        return sdp
+    return re.sub(
+        r"(a=rtpmap:96 H264/90000\r\n)",
+        rf"\1a=fmtp:96 {_H264_FMTP}\r\n",
+        sdp,
+    )
 
 
 def _ws_is_open(ws) -> bool:
@@ -61,6 +83,7 @@ class ZedWebRTCStreamer:
         self._loop = asyncio.get_event_loop()
         self._offer_pending = False
         self._answer_received = False
+        self._last_offer_sdp: str | None = None
 
     # -- pipeline -----------------------------------------------------------
 
@@ -139,9 +162,17 @@ class ZedWebRTCStreamer:
             log.warning("Offer creation returned no reply")
             return
         offer = reply.get_value("offer")
-        self.webrtcbin.emit("set-local-description", offer, None)
-        sdp_text = offer.sdp.as_text()
-        log.info("SDP offer created (%d bytes)", len(sdp_text))
+        sdp_text = _inject_h264_fmtp(offer.sdp.as_text())
+
+        _, patched_sdp = GstSdp.SDPMessage.new_from_text(sdp_text)
+        patched_offer = GstWebRTC.WebRTCSessionDescription.new(
+            GstWebRTC.WebRTCSDPType.OFFER, patched_sdp,
+        )
+        self.webrtcbin.emit("set-local-description", patched_offer, None)
+        self._last_offer_sdp = sdp_text
+
+        log.info("SDP offer created (%d bytes, fmtp=%s)",
+                 len(sdp_text), "a=fmtp:96" in sdp_text)
         asyncio.run_coroutine_threadsafe(
             self._send_signaling({"kind": "offer", "sdp": sdp_text}),
             self._loop,
@@ -238,13 +269,23 @@ class ZedWebRTCStreamer:
     def _dispatch_signaling(self, msg: dict):
         kind = msg.get("kind")
         if kind == "answer":
-            log.info("Received SDP answer")
             self._answer_received = True
-            _, sdpmsg = GstSdp.SDPMessage.new_from_text(msg["sdp"])
+            sdp_text = msg["sdp"]
+            # #region agent log
+            has_fmtp = "a=fmtp:96" in sdp_text
+            has_h264 = "H264" in sdp_text
+            has_video = "m=video" in sdp_text
+            local_desc = self.webrtcbin.get_property("local-description")
+            local_has_fmtp = "a=fmtp:96" in local_desc.sdp.as_text() if local_desc else False
+            log.info("Received SDP answer: size=%d has_video=%s has_h264=%s has_fmtp=%s local_has_fmtp=%s",
+                     len(sdp_text), has_video, has_h264, has_fmtp, local_has_fmtp)
+            # #endregion
+            _, sdpmsg = GstSdp.SDPMessage.new_from_text(sdp_text)
             answer = GstWebRTC.WebRTCSessionDescription.new(
                 GstWebRTC.WebRTCSDPType.ANSWER, sdpmsg,
             )
             self.webrtcbin.emit("set-remote-description", answer, None)
+            log.info("Remote description set successfully")
         elif kind == "ice":
             self.webrtcbin.emit(
                 "add-ice-candidate",
@@ -255,12 +296,15 @@ class ZedWebRTCStreamer:
             log.warning("Unknown signaling message kind: %s", kind)
 
     async def _retry_offer_until_answer(self):
-        # If viewer connects after robot boot, initial offer may be dropped by relay.
         while _ws_is_open(self.ws) and not self._answer_received:
             await asyncio.sleep(2.0)
             if self._answer_received or not _ws_is_open(self.ws):
                 break
-            self._request_offer("retry-no-answer")
+            if self._last_offer_sdp:
+                log.info("Resending SDP offer (retry-no-answer)")
+                await self._send_signaling({"kind": "offer", "sdp": self._last_offer_sdp})
+            else:
+                self._request_offer("retry-no-answer")
 
     # -- lifecycle ----------------------------------------------------------
 

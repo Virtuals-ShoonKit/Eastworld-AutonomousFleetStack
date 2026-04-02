@@ -195,6 +195,12 @@ export default function App() {
         </div>
 
         {/* Video grid */}
+        {(() => {
+          // #region agent log
+          console.log('[DEBUG-3d3ed7] VideoGrid render check', {robotIdsCount:robotIds.length, robotIds, signalingUrl:SIGNALING_URL});
+          // #endregion
+          return null;
+        })()}
         {robotIds.length > 0 && (
           <div style={{ height: 200, borderTop: "1px solid #222" }}>
             <VideoGrid robotIds={robotIds} signalingUrl={SIGNALING_URL} />
