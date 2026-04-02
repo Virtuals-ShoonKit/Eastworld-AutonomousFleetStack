@@ -1,0 +1,26 @@
+[project]
+name = "ew-fleet-edge"
+version = "0.1.0"
+description = "EastWorld fleet edge: ROS 2 bridge scripts + ZED WebRTC streamer"
+requires-python = ">=3.10"
+
+dependencies = [
+    # --- fleet_streamer: pose + cloud bridges ---
+    "websockets>=12.0",
+    "msgpack>=1.0",
+    "DracoPy>=2.0",
+    "numpy<2",
+    "zstandard>=0.22",
+    # --- fleet_streamer: zed_webrtc_streamer ---
+    "PyYAML>=6.0",
+    # GStreamer (gi, Gst) comes from system packages (JetPack 6)
+    # ROS 2 (rclpy, tf2_ros, sensor_msgs) comes from /opt/ros/humble
+]
+
+[dependency-groups]
+dev = []
+
+[tool.uv]
+# Allow uv to see ROS 2 system packages (rclpy, sensor_msgs, etc.)
+# that are installed under /opt/ros/humble/lib/python3.10/site-packages
+python-preference = "system"

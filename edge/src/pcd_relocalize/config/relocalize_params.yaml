@@ -1,0 +1,11 @@
+pcd_relocalizer:
+  ros__parameters:
+    map_pcd_path: ""
+    voxel_size: 0.5
+    accumulate_duration: 3.0
+    fpfh_radius: 1.5
+    normal_radius: 1.0
+    teaser_noise_bound: 0.1
+    gicp_max_correspondence_distance: 2.0
+    gicp_num_threads: 4
+    auto_relocalize: true

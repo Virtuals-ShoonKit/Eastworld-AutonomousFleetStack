@@ -1,0 +1,27 @@
+fleet_streamer:
+  # Per-robot identity (override via launch arg)
+  robot_id: "scout_mini_0"
+
+  # Host fleet server WebSocket URL
+  host_url: "ws://192.168.10.120:8800"
+
+  # --- ZED WebRTC settings ---
+  zed:
+    camera_resolution: 5        # 0=HD2K, 1=HD1080, 3=HD720, 5=VGA
+    camera_fps: 30
+    stream_type: 0              # 0=Left BGRA
+    bitrate: 1500000            # H.264 bitrate (bps)
+    iframeinterval: 30          # GOP size (keyframe every N frames)
+
+  # --- Pose bridge ---
+  pose:
+    source_frame: "base_link"
+    target_frame: "odom"
+    rate_hz: 50
+
+  # --- Cloud bridge ---
+  cloud:
+    input_topic: "/cloud_registered"
+    rate_hz: 10                  # throttle to N Hz
+    draco_quantization_bits: 11
+    use_zstd: false

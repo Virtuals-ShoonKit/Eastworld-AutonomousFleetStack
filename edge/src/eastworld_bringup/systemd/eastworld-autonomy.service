@@ -1,0 +1,18 @@
+[Unit]
+Description=EastWorld AutonomyStack (Livox + FAST-LIVO2 + Foxglove)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=nvidia
+Group=nvidia
+WorkingDirectory=/home/nvidia/Desktop/EastWorld-AutonomyStack
+ExecStart=/home/nvidia/Desktop/EastWorld-AutonomyStack/src/eastworld_bringup/scripts/start_autonomy_stack.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

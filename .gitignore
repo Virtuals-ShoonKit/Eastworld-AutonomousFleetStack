@@ -1,0 +1,29 @@
+# -- Build artifacts --
+edge/build/
+edge/install/
+edge/log/
+
+# -- Third-party binaries (use Git LFS or download separately) --
+edge/third_party/ZED_SDK_*.zstd.run
+
+# -- Edge --
+edge/.venv/
+
+# -- Host --
+host/.venv/
+host/web/node_modules/
+host/web/dist/
+host/server/__pycache__/
+
+# -- Shared --
+shared/__pycache__/
+
+# -- Python --
+__pycache__/
+*.pyc
+*.egg-info/
+
+# -- IDE --
+.vscode/
+.idea/
+*.swp

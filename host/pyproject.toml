@@ -1,0 +1,22 @@
+[project]
+name = "ew-fleet-host"
+version = "0.1.0"
+description = "EastWorld fleet management host: server + tools"
+requires-python = ">=3.10"
+
+dependencies = [
+    # --- server ---
+    "aiohttp>=3.9",
+    "msgpack>=1.0",
+    "pyyaml>=6.0",
+    # --- tools ---
+    "open3d>=0.18",
+    "DracoPy>=2.0",
+    "numpy<2",
+]
+
+[project.scripts]
+fleet-server = "server.fleet_server:main"
+
+[dependency-groups]
+dev = []

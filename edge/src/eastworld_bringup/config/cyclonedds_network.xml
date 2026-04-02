@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  CycloneDDS config for ROS 2 discovery over the network (robot + PC).
+  Tuned for large message transport (PointCloud2, images) across machines.
+
+  Use on BOTH sides:
+    export CYCLONEDDS_URI=file:///path/to/cyclonedds_network.xml
+-->
+<CycloneDDS xmlns="https://cdds.io/config"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="https://cdds.io/config
+            https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
+  <Domain id="any">
+    <General>
+      <AllowMulticast>true</AllowMulticast>
+      <MaxMessageSize>65500B</MaxMessageSize>
+      <FragmentSize>60000B</FragmentSize>
+    </General>
+    <Internal>
+      <SocketReceiveBufferSize min="10MB"/>
+      <SocketSendBufferSize min="4MB"/>
+      <MaxFragmentsPerMsg>512</MaxFragmentsPerMsg>
+      <DefragReliableMaxSamples>16</DefragReliableMaxSamples>
+      <DefragUnreliableMaxSamples>8</DefragUnreliableMaxSamples>
+    </Internal>
+  </Domain>
+</CycloneDDS>

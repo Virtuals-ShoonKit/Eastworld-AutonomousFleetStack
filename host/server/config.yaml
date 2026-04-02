@@ -1,0 +1,10 @@
+fleet:
+  max_robots: 5
+  heartbeat_timeout_s: 10.0
+
+server:
+  host: "0.0.0.0"
+  port: 8800
+
+maps:
+  directory: "../web/public/maps"

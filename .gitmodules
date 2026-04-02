@@ -1,0 +1,9 @@
+[submodule "edge/third_party/TEASER-plusplus"]
+	path = edge/third_party/TEASER-plusplus
+	url = https://github.com/MIT-SPARK/TEASER-plusplus.git
+[submodule "edge/third_party/small_gicp"]
+	path = edge/third_party/small_gicp
+	url = https://github.com/koide3/small_gicp.git
+[submodule "edge/third_party/Livox-SDK2"]
+	path = edge/third_party/Livox-SDK2
+	url = https://github.com/Livox-SDK/Livox-SDK2.git

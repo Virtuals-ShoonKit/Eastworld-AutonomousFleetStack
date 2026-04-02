@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  CycloneDDS config tuned for lowest latency on a single Jetson (localhost only).
+  All DDS traffic is confined to the loopback interface – no WiFi/eth overhead.
+-->
+<CycloneDDS xmlns="https://cdds.io/config"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="https://cdds.io/config
+            https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="lo" priority="default" multicast="true" />
+      </Interfaces>
+      <!-- Multicast on loopback is free (virtual interface, no wire traffic) -->
+      <AllowMulticast>spdp</AllowMulticast>
+      <!-- Max UDP payload before fragmentation (loopback MTU is 65536) -->
+      <MaxMessageSize>65500B</MaxMessageSize>
+    </General>
+    <Internal>
+      <!--
+        Deliver data synchronously in the receive thread instead of
+        deferring to a delivery thread.  Eliminates one context-switch
+        per sample – measurable latency and jitter reduction.
+      -->
+      <SynchronousDeliveryPriorityThreshold>0</SynchronousDeliveryPriorityThreshold>
+    </Internal>
+  </Domain>
+</CycloneDDS>

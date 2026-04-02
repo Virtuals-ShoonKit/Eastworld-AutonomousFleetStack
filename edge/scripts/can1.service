@@ -1,0 +1,14 @@
+[Unit]
+Description=Bring up CAN1 interface at 500kbps for Scout Mini
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/sbin/ip link set can1 down
+ExecStart=/sbin/ip link set can1 up type can bitrate 500000
+ExecStop=/sbin/ip link set can1 down
+
+[Install]
+WantedBy=multi-user.target
