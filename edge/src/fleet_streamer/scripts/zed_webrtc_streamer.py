@@ -104,7 +104,7 @@ class ZedWebRTCStreamer:
             f"! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} idrinterval={idr} "
             "insert-sps-pps=true insert-aud=true maxperf-enable=true preset-level=1 control-rate=1 num-B-Frames=0 "
             f"! rtph264pay config-interval={rtp_config_interval} aggregate-mode=zero-latency mtu={rtp_mtu} pt=96 "
-            "! application/x-rtp,media=video,encoding-name=H264,payload=96 "
+            "! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 "
             f"! webrtcbin name=webrtc bundle-policy=max-bundle async-handling=true latency={webrtc_latency_ms}"
         )
         log.info("GStreamer pipeline: %s", desc)
@@ -148,6 +148,7 @@ class ZedWebRTCStreamer:
         )
 
     def _on_ice_candidate(self, _webrtc, mline_index, candidate):
+        log.info("Local ICE candidate generated (mline=%s)", mline_index)
         asyncio.run_coroutine_threadsafe(
             self._send_signaling({
                 "kind": "ice",
@@ -239,6 +240,15 @@ class ZedWebRTCStreamer:
         kind = msg.get("kind")
         if kind == "answer":
             log.info("Received SDP answer")
+            answer_sdp = msg.get("sdp", "")
+            has_video_mline = "m=video" in answer_sdp
+            has_h264 = "H264" in answer_sdp.upper()
+            log.info(
+                "Answer SDP diagnostics: has_video_mline=%s has_h264=%s size=%d",
+                has_video_mline,
+                has_h264,
+                len(answer_sdp),
+            )
             self._answer_received = True
             _, sdpmsg = GstSdp.SDPMessage.new_from_text(msg["sdp"])
             answer = GstWebRTC.WebRTCSessionDescription.new(
@@ -246,6 +256,7 @@ class ZedWebRTCStreamer:
             )
             self.webrtcbin.emit("set-remote-description", answer, None)
         elif kind == "ice":
+            log.info("Remote ICE candidate received (mline=%s)", msg.get("sdpMLineIndex"))
             self.webrtcbin.emit(
                 "add-ice-candidate",
                 msg["sdpMLineIndex"],
