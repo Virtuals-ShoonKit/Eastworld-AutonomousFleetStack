@@ -16,6 +16,12 @@ interface Props {
 export function RobotMarker({ robotId, index, pose }: Props) {
   const groupRef = useRef<THREE.Group>(null);
   const color = ROBOT_COLORS[index % ROBOT_COLORS.length];
+  const wheelOffsets: Array<[number, number, number]> = [
+    [0.28, 0.22, 0.06],   // front-left
+    [0.28, -0.22, 0.06],  // front-right
+    [-0.28, 0.22, 0.06],  // rear-left
+    [-0.28, -0.22, 0.06], // rear-right
+  ];
 
   useFrame(() => {
     if (!groupRef.current || !pose) return;
@@ -27,20 +33,43 @@ export function RobotMarker({ robotId, index, pose }: Props) {
 
   return (
     <group ref={groupRef}>
-      {/* Body */}
-      <mesh>
-        <boxGeometry args={[0.5, 0.3, 0.2]} />
-        <meshStandardMaterial color={color} transparent opacity={0.85} />
+      {/* Chassis */}
+      <mesh position={[0, 0, 0.16]}>
+        <boxGeometry args={[0.68, 0.46, 0.16]} />
+        <meshStandardMaterial color={color} transparent opacity={0.9} metalness={0.1} roughness={0.7} />
       </mesh>
-      {/* Direction arrow */}
-      <mesh position={[0.35, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
-        <coneGeometry args={[0.1, 0.2, 8]} />
-        <meshStandardMaterial color={color} />
+
+      {/* Top deck */}
+      <mesh position={[0, 0, 0.26]}>
+        <boxGeometry args={[0.42, 0.28, 0.04]} />
+        <meshStandardMaterial color="#2a2f38" metalness={0.25} roughness={0.55} />
       </mesh>
-      {/* Label */}
-      <sprite position={[0, 0, 0.4]} scale={[0.8, 0.2, 1]}>
-        <spriteMaterial color={color} />
-      </sprite>
+
+      {/* Sensor mast mock */}
+      <mesh position={[0.08, 0, 0.34]}>
+        <cylinderGeometry args={[0.02, 0.02, 0.16, 12]} />
+        <meshStandardMaterial color="#8aa0b5" metalness={0.4} roughness={0.4} />
+      </mesh>
+
+      {/* Wheels */}
+      {wheelOffsets.map(([x, y, z], i) => (
+        <group key={`${robotId}-wheel-${i}`} position={[x, y, z]}>
+          <mesh>
+            <cylinderGeometry args={[0.1, 0.1, 0.08, 18]} />
+            <meshStandardMaterial color="#22262c" roughness={0.95} metalness={0.02} />
+          </mesh>
+          <mesh>
+            <cylinderGeometry args={[0.045, 0.045, 0.082, 14]} />
+            <meshStandardMaterial color="#505a66" roughness={0.45} metalness={0.4} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Heading arrow */}
+      <mesh position={[0.42, 0, 0.22]} rotation={[0, 0, -Math.PI / 2]}>
+        <coneGeometry args={[0.06, 0.16, 10]} />
+        <meshStandardMaterial color="#f4f7ff" emissive="#6076ff" emissiveIntensity={0.35} />
+      </mesh>
     </group>
   );
 }

@@ -1,20 +1,86 @@
 import { useEffect, useRef, useMemo, useCallback } from "react";
+import { useFrame } from "@react-three/fiber";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import type { CloudData } from "../lib/protocol";
+import type { RobotState } from "../hooks/useFleetSocket";
 
 const DRACO_DECODER_PATH = "https://www.gstatic.com/draco/versioned/decoders/1.5.7/";
+const LIVE_TRAIL_FADE_START_MS = 5_000;
+const LIVE_TRAIL_FADE_END_MS = 10_000;
+const LIVE_TRAIL_MAX_SNAPSHOTS = 40;
+const LIVE_CLOUD_RANGE_M = 10;
+const LIVE_CLOUD_RANGE_M2 = LIVE_CLOUD_RANGE_M * LIVE_CLOUD_RANGE_M;
 
 interface Props {
   mapUrl?: string;
   onCloudRegister: (cb: (cloud: CloudData) => void) => () => void;
+  robots: Map<string, RobotState>;
+  pointCloudColor: string;
+  randomizeLiveCloud: boolean;
 }
 
-export function PointCloudLayer({ mapUrl, onCloudRegister }: Props) {
+interface LiveCloudSnapshot {
+  robotId: string;
+  points: THREE.Points;
+  material: THREE.PointsMaterial;
+  createdAtMs: number;
+}
+
+function filterCloudByRange(
+  geometry: THREE.BufferGeometry,
+  center: [number, number, number]
+): THREE.BufferGeometry {
+  const position = geometry.getAttribute("position");
+  if (!(position instanceof THREE.BufferAttribute)) return geometry;
+
+  const cx = center[0];
+  const cy = center[1];
+  const cz = center[2];
+  const kept: number[] = [];
+
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i);
+    const y = position.getY(i);
+    const z = position.getZ(i);
+    const dx = x - cx;
+    const dy = y - cy;
+    const dz = z - cz;
+    if (dx * dx + dy * dy + dz * dz <= LIVE_CLOUD_RANGE_M2) {
+      kept.push(x, y, z);
+    }
+  }
+
+  const filtered = new THREE.BufferGeometry();
+  filtered.setAttribute("position", new THREE.Float32BufferAttribute(kept, 3));
+  geometry.dispose();
+  return filtered;
+}
+
+export function PointCloudLayer({
+  mapUrl,
+  onCloudRegister,
+  robots,
+  pointCloudColor,
+  randomizeLiveCloud,
+}: Props) {
   const mapPointsRef = useRef<THREE.Points | null>(null);
-  const livePointsRef = useRef<THREE.Points | null>(null);
+  const liveLayerRef = useRef<THREE.Group | null>(null);
+  const liveSnapshotsRef = useRef<LiveCloudSnapshot[]>([]);
+  const robotsRef = useRef(robots);
   const { camera, controls } = useThree();
+
+  useEffect(() => {
+    robotsRef.current = robots;
+  }, [robots]);
+
+  useEffect(() => {
+    if (mapPointsRef.current?.material instanceof THREE.PointsMaterial) {
+      mapPointsRef.current.material.color.set(pointCloudColor);
+      mapPointsRef.current.material.needsUpdate = true;
+    }
+  }, [pointCloudColor]);
 
   const dracoLoader = useMemo(() => {
     const loader = new DRACOLoader();
@@ -58,19 +124,19 @@ export function PointCloudLayer({ mapUrl, onCloudRegister }: Props) {
 
     dracoLoader.load(
       mapUrl,
-      (geometry) => {
+      (geometry: THREE.BufferGeometry) => {
         if (mapPointsRef.current) {
           mapPointsRef.current.geometry.dispose();
           mapPointsRef.current.geometry = geometry;
           fitCameraToGeometry(geometry);
         }
       },
-      (progress) => {
+      (progress: ProgressEvent<EventTarget>) => {
         if (progress.total > 0) {
           console.log(`Map loading: ${((progress.loaded / progress.total) * 100).toFixed(0)}%`);
         }
       },
-      (error) => {
+      (error: unknown) => {
         console.error("Failed to load map .drc file:", error);
         console.error("URL was:", mapUrl);
       }
@@ -80,18 +146,98 @@ export function PointCloudLayer({ mapUrl, onCloudRegister }: Props) {
   // Subscribe to live cloud updates
   useEffect(() => {
     const unsubscribe = onCloudRegister((cloud: CloudData) => {
-      if (!livePointsRef.current) return;
+      if (!liveLayerRef.current) return;
       const u8 = new Uint8Array(cloud.d as ArrayLike<number>);
       const blob = new Blob([u8.buffer as ArrayBuffer]);
       const url = URL.createObjectURL(blob);
-      dracoLoader.load(url, (geometry) => {
-        livePointsRef.current!.geometry.dispose();
-        livePointsRef.current!.geometry = geometry;
-        URL.revokeObjectURL(url);
-      });
+      dracoLoader.load(
+        url,
+        (geometry: THREE.BufferGeometry) => {
+          const pose = robotsRef.current.get(cloud.r)?.pose;
+          const filteredGeometry = pose
+            ? filterCloudByRange(geometry, pose.p)
+            : geometry;
+          const liveColor = randomizeLiveCloud
+            ? new THREE.Color().setHSL(Math.random(), 0.75, 0.62)
+            : pointCloudColor;
+          const material = new THREE.PointsMaterial({
+            size: 0.06,
+            color: liveColor,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.9,
+            depthWrite: false,
+          });
+          const points = new THREE.Points(filteredGeometry, material);
+          liveLayerRef.current!.add(points);
+          liveSnapshotsRef.current.push({
+            robotId: cloud.r,
+            points,
+            material,
+            createdAtMs: Date.now(),
+          });
+
+          if (liveSnapshotsRef.current.length > LIVE_TRAIL_MAX_SNAPSHOTS) {
+            const old = liveSnapshotsRef.current.shift();
+            if (old) {
+              liveLayerRef.current!.remove(old.points);
+              old.points.geometry.dispose();
+              old.material.dispose();
+            }
+          }
+          URL.revokeObjectURL(url);
+        },
+        undefined,
+        () => {
+          URL.revokeObjectURL(url);
+        }
+      );
     });
-    return unsubscribe;
-  }, [dracoLoader, onCloudRegister]);
+    return () => {
+      unsubscribe();
+      for (const snap of liveSnapshotsRef.current) {
+        liveLayerRef.current?.remove(snap.points);
+        snap.points.geometry.dispose();
+        snap.material.dispose();
+      }
+      liveSnapshotsRef.current = [];
+    };
+  }, [dracoLoader, onCloudRegister, pointCloudColor, randomizeLiveCloud]);
+
+  useFrame(() => {
+    const now = Date.now();
+    const next: LiveCloudSnapshot[] = [];
+    const activeRobotIds = new Set(robotsRef.current.keys());
+
+    for (const snap of liveSnapshotsRef.current) {
+      if (!activeRobotIds.has(snap.robotId)) {
+        liveLayerRef.current?.remove(snap.points);
+        snap.points.geometry.dispose();
+        snap.material.dispose();
+        continue;
+      }
+
+      const ageMs = now - snap.createdAtMs;
+      if (ageMs >= LIVE_TRAIL_FADE_END_MS) {
+        liveLayerRef.current?.remove(snap.points);
+        snap.points.geometry.dispose();
+        snap.material.dispose();
+        continue;
+      }
+
+      if (ageMs <= LIVE_TRAIL_FADE_START_MS) {
+        snap.material.opacity = 0.9;
+      } else {
+        const t =
+          (ageMs - LIVE_TRAIL_FADE_START_MS) /
+          (LIVE_TRAIL_FADE_END_MS - LIVE_TRAIL_FADE_START_MS);
+        snap.material.opacity = 0.9 * (1 - t);
+      }
+      next.push(snap);
+    }
+
+    liveSnapshotsRef.current = next;
+  });
 
   return (
     <>
@@ -101,22 +247,12 @@ export function PointCloudLayer({ mapUrl, onCloudRegister }: Props) {
         <pointsMaterial
           size={0.05}
           vertexColors={false}
-          color="#7799bb"
+          color={pointCloudColor}
           sizeAttenuation
         />
       </points>
-      {/* Live scan overlay */}
-      <points ref={livePointsRef}>
-        <bufferGeometry />
-        <pointsMaterial
-          size={0.06}
-          vertexColors={false}
-          color="#00ff88"
-          sizeAttenuation
-          transparent
-          opacity={0.8}
-        />
-      </points>
+      {/* Live scan overlay with short persistence trail */}
+      <group ref={liveLayerRef} />
     </>
   );
 }
