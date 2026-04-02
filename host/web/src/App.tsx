@@ -17,7 +17,9 @@ export default function App() {
   const [isControlsOpen, setIsControlsOpen] = useState(false);
   const [randomizeLiveCloud, setRandomizeLiveCloud] = useState(true);
   const [showOriginAxes, setShowOriginAxes] = useState(true);
-  const [originAxesLength, setOriginAxesLength] = useState(2);
+  const [originAxesLength, setOriginAxesLength] = useState(1);
+  const [originAxesThickness, setOriginAxesThickness] = useState(0.05);
+  const [mapZOffset, setMapZOffset] = useState(0);
 
   return (
     <div style={{ display: "flex", height: "100vh", width: "100vw" }}>
@@ -36,6 +38,8 @@ export default function App() {
             randomizeLiveCloud={randomizeLiveCloud}
             showOriginAxes={showOriginAxes}
             originAxesLength={originAxesLength}
+            originAxesThickness={originAxesThickness}
+            mapZOffset={mapZOffset}
           />
           <div style={{
             position: "absolute",
@@ -161,6 +165,28 @@ export default function App() {
                     step={0.5}
                     value={originAxesLength}
                     onChange={(e) => setOriginAxesLength(Number(e.target.value))}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Axes Thickness: {originAxesThickness.toFixed(2)} m</span>
+                  <input
+                    type="range"
+                    min={0.01}
+                    max={0.3}
+                    step={0.01}
+                    value={originAxesThickness}
+                    onChange={(e) => setOriginAxesThickness(Number(e.target.value))}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Map Z Offset: {mapZOffset.toFixed(2)} m</span>
+                  <input
+                    type="range"
+                    min={-2}
+                    max={2}
+                    step={0.01}
+                    value={mapZOffset}
+                    onChange={(e) => setMapZOffset(Number(e.target.value))}
                   />
                 </label>
               </div>

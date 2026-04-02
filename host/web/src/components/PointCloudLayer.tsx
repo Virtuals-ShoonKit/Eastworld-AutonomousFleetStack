@@ -19,6 +19,7 @@ interface Props {
   robots: Map<string, RobotState>;
   pointCloudColor: string;
   randomizeLiveCloud: boolean;
+  mapZOffset: number;
 }
 
 interface LiveCloudSnapshot {
@@ -64,6 +65,7 @@ export function PointCloudLayer({
   robots,
   pointCloudColor,
   randomizeLiveCloud,
+  mapZOffset,
 }: Props) {
   const mapPointsRef = useRef<THREE.Points | null>(null);
   const liveLayerRef = useRef<THREE.Group | null>(null);
@@ -240,7 +242,7 @@ export function PointCloudLayer({
   });
 
   return (
-    <>
+    <group position={[0, 0, mapZOffset]}>
       {/* Static map */}
       <points ref={mapPointsRef}>
         <bufferGeometry />
@@ -253,6 +255,6 @@ export function PointCloudLayer({
       </points>
       {/* Live scan overlay with short persistence trail */}
       <group ref={liveLayerRef} />
-    </>
+    </group>
   );
 }
