@@ -127,7 +127,7 @@ class ZedWebRTCStreamer:
             f"! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} idrinterval={idr} "
             "insert-sps-pps=true insert-aud=true maxperf-enable=true preset-level=1 control-rate=1 num-B-Frames=0 "
             f"! rtph264pay config-interval={rtp_config_interval} aggregate-mode=zero-latency mtu={rtp_mtu} pt=96 "
-            "! application/x-rtp,media=video,encoding-name=H264,payload=96 "
+            "! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 "
             f"! webrtcbin name=webrtc bundle-policy=max-bundle async-handling=true latency={webrtc_latency_ms}"
         )
         log.info("GStreamer pipeline: %s", desc)
@@ -179,6 +179,7 @@ class ZedWebRTCStreamer:
         )
 
     def _on_ice_candidate(self, _webrtc, mline_index, candidate):
+        log.info("Local ICE candidate generated (mline=%s)", mline_index)
         asyncio.run_coroutine_threadsafe(
             self._send_signaling({
                 "kind": "ice",
@@ -287,6 +288,7 @@ class ZedWebRTCStreamer:
             self.webrtcbin.emit("set-remote-description", answer, None)
             log.info("Remote description set successfully")
         elif kind == "ice":
+            log.info("Remote ICE candidate received (mline=%s)", msg.get("sdpMLineIndex"))
             self.webrtcbin.emit(
                 "add-ice-candidate",
                 msg["sdpMLineIndex"],
