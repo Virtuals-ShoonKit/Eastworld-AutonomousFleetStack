@@ -16,6 +16,8 @@ Usage:
 """
 
 import os
+from pathlib import Path
+import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition, UnlessCondition
@@ -52,6 +54,25 @@ def generate_launch_description():
     rviz_config = os.path.join(bringup_dir, "config", "fast-livo.rviz")
     camera_config = os.path.join(fast_livo_dir, "config", "camera_pinhole.yaml")
     livox_json = os.path.join(livox_dir, "config", "MID360_config.json")
+    fleet_config = os.path.join(fleet_streamer_dir, "config", "fleet_streamer.yaml")
+    default_robot_id = "robot_0"
+    default_host_url = "ws://192.168.1.100:8800"
+    try:
+        with open(fleet_config, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        fleet_cfg = cfg.get("fleet_streamer", {})
+        default_robot_id = str(fleet_cfg.get("robot_id", default_robot_id))
+        default_host_url = str(fleet_cfg.get("host_url", default_host_url))
+    except Exception:
+        # Fall back to hardcoded defaults if config is unavailable.
+        pass
+
+    default_map_pcd_path = ""
+    for _p in Path(__file__).resolve().parents:
+        _candidate = _p / "maps" / "office_map.pcd"
+        if _candidate.exists():
+            default_map_pcd_path = str(_candidate)
+            break
 
     # ── Launch arguments ───────────────────────────────────────────────
     use_rviz_arg = DeclareLaunchArgument(
@@ -146,11 +167,11 @@ def generate_launch_description():
 
     # ── map → odom TF ────────────────────────────────────────────
     use_relocalize_arg = DeclareLaunchArgument(
-        "use_relocalize", default_value="false",
+        "use_relocalize", default_value="true",
         description="Launch PCD relocalizer for automatic map→odom on startup",
     )
     map_pcd_path_arg = DeclareLaunchArgument(
-        "map_pcd_path", default_value="",
+        "map_pcd_path", default_value=default_map_pcd_path,
         description="Path to reference PCD map for relocalization",
     )
 
@@ -205,15 +226,15 @@ def generate_launch_description():
     # ── 5. Fleet streamer (ZED WebRTC + pose/cloud bridges) ───────
     use_fleet_streaming_arg = DeclareLaunchArgument(
         "use_fleet_streaming",
-        default_value="false",
+        default_value="true",
         description="Launch fleet streaming bridge (ZED WebRTC, pose, cloud to host)",
     )
     robot_id_arg = DeclareLaunchArgument(
-        "robot_id", default_value="robot_0",
+        "robot_id", default_value=default_robot_id,
         description="Unique robot identifier for fleet management",
     )
     host_url_arg = DeclareLaunchArgument(
-        "host_url", default_value="ws://192.168.1.100:8800",
+        "host_url", default_value=default_host_url,
         description="Host fleet server WebSocket URL",
     )
 

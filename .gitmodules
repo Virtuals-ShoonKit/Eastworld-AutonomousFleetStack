@@ -7,3 +7,6 @@
 [submodule "edge/third_party/Livox-SDK2"]
 	path = edge/third_party/Livox-SDK2
 	url = https://github.com/Livox-SDK/Livox-SDK2.git
+[submodule "edge/third_party/zed-gstreamer"]
+	path = edge/third_party/zed-gstreamer
+	url = https://github.com/stereolabs/zed-gstreamer.git

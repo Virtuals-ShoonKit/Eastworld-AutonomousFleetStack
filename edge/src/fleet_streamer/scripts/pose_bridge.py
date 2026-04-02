@@ -12,6 +12,7 @@ import asyncio
 import sys
 import threading
 import time
+from pathlib import Path
 
 import msgpack
 import rclpy
@@ -20,8 +21,29 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from tf2_ros import Buffer, TransformListener
 
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[4] / "shared"))
+_shared_dir = None
+for _p in Path(__file__).resolve().parents:
+    _candidate = _p / "shared" / "protocol.py"
+    if _candidate.exists():
+        _shared_dir = _candidate.parent
+        break
+if _shared_dir is None:
+    _shared_dir = Path(__file__).resolve().parents[4] / "shared"
+sys.path.insert(0, str(_shared_dir))
 from protocol import PoseMsg  # noqa: E402
+
+
+def _ws_is_open(ws) -> bool:
+    if ws is None:
+        return False
+    if hasattr(ws, "open"):
+        return bool(ws.open)
+    if hasattr(ws, "closed"):
+        return not bool(ws.closed)
+    state = getattr(ws, "state", None)
+    if state is not None:
+        return str(state).lower().endswith("open")
+    return True
 
 
 class PoseBridge(Node):
@@ -72,7 +94,7 @@ class PoseBridge(Node):
 
         with self._ws_lock:
             ws = self._ws
-        if ws and ws.open:
+        if _ws_is_open(ws):
             asyncio.run_coroutine_threadsafe(ws.send(packed), self._async_loop)
 
     def set_ws(self, ws, loop):
@@ -114,9 +136,19 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
-        loop.call_soon_threadsafe(loop.stop)
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

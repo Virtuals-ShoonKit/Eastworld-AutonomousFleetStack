@@ -13,6 +13,7 @@ import struct
 import sys
 import threading
 import time
+from pathlib import Path
 
 import DracoPy
 import msgpack
@@ -24,13 +25,34 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import PointCloud2
 import sensor_msgs_py.point_cloud2 as pc2
 
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[4] / "shared"))
+_shared_dir = None
+for _p in Path(__file__).resolve().parents:
+    _candidate = _p / "shared" / "protocol.py"
+    if _candidate.exists():
+        _shared_dir = _candidate.parent
+        break
+if _shared_dir is None:
+    _shared_dir = Path(__file__).resolve().parents[4] / "shared"
+sys.path.insert(0, str(_shared_dir))
 from protocol import CloudMsg  # noqa: E402
 
 try:
     import zstandard as zstd
 except ImportError:
     zstd = None
+
+
+def _ws_is_open(ws) -> bool:
+    if ws is None:
+        return False
+    if hasattr(ws, "open"):
+        return bool(ws.open)
+    if hasattr(ws, "closed"):
+        return not bool(ws.closed)
+    state = getattr(ws, "state", None)
+    if state is not None:
+        return str(state).lower().endswith("open")
+    return True
 
 
 class CloudBridge(Node):
@@ -62,10 +84,12 @@ class CloudBridge(Node):
 
         self._zstd_comp = zstd.ZstdCompressor(level=3) if self.use_zstd else None
 
+        # Match FAST-LIVO2 /cloud_registered publisher: rclcpp::QoS(KeepLast(100)) defaults to RELIABLE.
+        # BEST_EFFORT here will not match a RELIABLE publisher, so the bridge receives zero clouds.
         qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1,
+            depth=10,
         )
         self.create_subscription(PointCloud2, input_topic, self._on_cloud, qos)
         self.get_logger().info(
@@ -107,7 +131,7 @@ class CloudBridge(Node):
         with self._ws_lock:
             ws = self._ws
             loop = self._async_loop
-        if ws and ws.open and loop:
+        if _ws_is_open(ws) and loop:
             asyncio.run_coroutine_threadsafe(ws.send(packed), loop)
 
     def set_ws(self, ws, loop):
@@ -147,9 +171,19 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
-        loop.call_soon_threadsafe(loop.stop)
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

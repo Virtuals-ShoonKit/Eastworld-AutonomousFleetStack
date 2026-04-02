@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 import signal
-import sys
 from pathlib import Path
 
 import gi
@@ -32,22 +31,22 @@ import yaml  # noqa: E402
 
 log = logging.getLogger("zed_webrtc")
 
+
+def _ws_is_open(ws) -> bool:
+    if ws is None:
+        return False
+    if hasattr(ws, "open"):
+        return bool(ws.open)
+    if hasattr(ws, "closed"):
+        return not bool(ws.closed)
+    state = getattr(ws, "state", None)
+    if state is not None:
+        return str(state).lower().endswith("open")
+    return True
+
 # ---------------------------------------------------------------------------
 # GStreamer pipeline
 # ---------------------------------------------------------------------------
-
-PIPELINE_TPL = (
-    "zedsrc stream-type={stream_type} camera-resolution={resolution} camera-fps={fps} "
-    "! queue leaky=downstream max-size-buffers=1 "
-    "! nvvideoconvert "
-    '! "video/x-raw(memory:NVMM),format=NV12" '
-    "! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} "
-    "insert-sps-pps=true maxperf-enable=true preset-level=1 control-rate=1 "
-    "! rtph264pay config-interval=1 pt=96 "
-    '! "application/x-rtp,media=video,encoding-name=H264,payload=96" '
-    "! webrtcbin name=webrtc bundle-policy=max-bundle"
-)
-
 
 class ZedWebRTCStreamer:
     """Manages the GStreamer pipeline and WebSocket signaling."""
@@ -63,13 +62,48 @@ class ZedWebRTCStreamer:
 
     # -- pipeline -----------------------------------------------------------
 
+    def _cfg_int(self, key: str, default: int, minimum: int | None = None) -> int:
+        value = self.zed_cfg.get(key, default)
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = default
+        if minimum is not None:
+            value = max(minimum, value)
+        return value
+
+    def _cfg_bool(self, key: str, default: bool) -> bool:
+        value = self.zed_cfg.get(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
     def _build_pipeline(self):
-        desc = PIPELINE_TPL.format(
-            stream_type=self.zed_cfg.get("stream_type", 0),
-            resolution=self.zed_cfg.get("camera_resolution", 3),
-            fps=self.zed_cfg.get("camera_fps", 30),
-            bitrate=self.zed_cfg.get("bitrate", 2_000_000),
-            gop=self.zed_cfg.get("iframeinterval", 30),
+        stream_type = self._cfg_int("stream_type", 0, minimum=0)
+        resolution = self._cfg_int("camera_resolution", 3, minimum=0)
+        fps = self._cfg_int("camera_fps", 30, minimum=1)
+        bitrate = self._cfg_int("bitrate", 2_000_000, minimum=1)
+        gop = self._cfg_int("iframeinterval", 30, minimum=1)
+        idr = self._cfg_int("idrinterval", gop, minimum=1)
+        queue_max_buffers = self._cfg_int("queue_max_buffers", 1, minimum=1)
+        rtp_mtu = self._cfg_int("rtp_mtu", 1200, minimum=200)
+        webrtc_latency_ms = self._cfg_int("webrtc_latency_ms", 30, minimum=0)
+        rtp_config_interval = self._cfg_int("rtp_config_interval", -1, minimum=-1)
+        drop_when_congested = self._cfg_bool("drop_when_congested", True)
+
+        queue_leaky = "downstream" if drop_when_congested else "no"
+        desc = (
+            f"zedsrc stream-type={stream_type} camera-resolution={resolution} camera-fps={fps} "
+            f"! queue leaky={queue_leaky} max-size-buffers={queue_max_buffers} max-size-bytes=0 max-size-time=0 "
+            "! nvvideoconvert "
+            "! video/x-raw(memory:NVMM),format=NV12 "
+            f"! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} idrinterval={idr} "
+            "insert-sps-pps=true insert-aud=true maxperf-enable=true preset-level=1 control-rate=1 num-B-Frames=0 "
+            f"! rtph264pay config-interval={rtp_config_interval} aggregate-mode=zero-latency mtu={rtp_mtu} pt=96 "
+            "! application/x-rtp,media=video,encoding-name=H264,payload=96 "
+            f"! webrtcbin name=webrtc bundle-policy=max-bundle async-handling=true latency={webrtc_latency_ms}"
         )
         log.info("GStreamer pipeline: %s", desc)
         self.pipeline = Gst.parse_launch(desc)
@@ -113,19 +147,46 @@ class ZedWebRTCStreamer:
         self._build_pipeline()
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
-            log.fatal("Failed to start GStreamer pipeline")
-            sys.exit(1)
+            bus = self.pipeline.get_bus()
+            msg = bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.WARNING) if bus else None
+            camera_start_failed = False
+            camera_error_text = ""
+            if msg:
+                if msg.type == Gst.MessageType.ERROR:
+                    err, dbg = msg.parse_error()
+                    camera_error_text = str(err)
+                    if "CAMERA STREAM FAILED TO START" in camera_error_text:
+                        camera_start_failed = True
+                    log.error(
+                        "Pipeline bus error from %s: %s (%s)",
+                        msg.src.get_name() if msg.src else "unknown",
+                        err,
+                        dbg,
+                    )
+                elif msg.type == Gst.MessageType.WARNING:
+                    warn, dbg = msg.parse_warning()
+                    log.warning(
+                        "Pipeline bus warning from %s: %s (%s)",
+                        msg.src.get_name() if msg.src else "unknown",
+                        warn,
+                        dbg,
+                    )
+            if camera_start_failed:
+                raise RuntimeError(f"Camera start failure: {camera_error_text}")
+            raise RuntimeError("Failed to start GStreamer pipeline")
         log.info("Pipeline PLAYING")
 
     def stop_pipeline(self):
         if self.pipeline:
             self.pipeline.set_state(Gst.State.NULL)
             log.info("Pipeline stopped")
+        self.webrtcbin = None
+        self.pipeline = None
 
     # -- signaling ----------------------------------------------------------
 
     async def _send_signaling(self, msg: dict):
-        if self.ws and self.ws.open:
+        if _ws_is_open(self.ws):
             msg["robot_id"] = self.robot_id
             await self.ws.send(json.dumps(msg))
 
@@ -142,8 +203,13 @@ class ZedWebRTCStreamer:
                     self._dispatch_signaling(msg)
             except websockets.ConnectionClosed:
                 log.warning("Signaling connection lost -- reconnecting")
+            except Exception as exc:
+                if "Camera start failure:" in str(exc):
+                    raise
+                log.exception("WebRTC stream loop failed -- reconnecting")
+            finally:
                 self.stop_pipeline()
-                continue
+                self.ws = None
 
     def _dispatch_signaling(self, msg: dict):
         kind = msg.get("kind")
@@ -185,7 +251,8 @@ def load_zed_config(config_path: str | None) -> dict:
     if config_path and Path(config_path).is_file():
         with open(config_path) as f:
             cfg = yaml.safe_load(f)
-        return cfg.get("fleet_streamer", {}).get("zed", {})
+        zed_cfg = cfg.get("fleet_streamer", {}).get("zed", {})
+        return zed_cfg
     return {}
 
 
@@ -196,6 +263,18 @@ def main():
     )
     args = parse_args()
     Gst.init(None)
+    has_zedsrc = Gst.ElementFactory.find("zedsrc") is not None
+    has_webrtcbin = Gst.ElementFactory.find("webrtcbin") is not None
+    has_nice_plugin = Gst.Registry.get().find_plugin("nice") is not None
+    if not has_zedsrc:
+        log.error("Missing GStreamer plugin 'zedsrc'. Install/source ZED GStreamer plugins.")
+        return
+    if not has_webrtcbin:
+        log.error("Missing GStreamer plugin 'webrtcbin'. Install gst-plugins-bad.")
+        return
+    if not has_nice_plugin:
+        log.error("Missing GStreamer plugin 'nice' (libgstnice). Install gstreamer1.0-nice.")
+        return
 
     zed_cfg = load_zed_config(args.config)
     streamer = ZedWebRTCStreamer(args.robot_id, args.host_url, zed_cfg)

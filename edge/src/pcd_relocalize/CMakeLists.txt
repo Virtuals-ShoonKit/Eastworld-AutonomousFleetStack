@@ -59,6 +59,10 @@ target_link_libraries(pcd_relocalizer_node
   small_gicp
   Eigen3::Eigen
 )
+set_target_properties(pcd_relocalizer_node PROPERTIES
+  BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}/teaser_build/teaser;${CMAKE_CURRENT_BINARY_DIR}/small_gicp_build"
+  INSTALL_RPATH "${CMAKE_CURRENT_BINARY_DIR}/teaser_build/teaser;${CMAKE_CURRENT_BINARY_DIR}/small_gicp_build"
+)
 if(OpenMP_CXX_FOUND)
   target_link_libraries(pcd_relocalizer_node OpenMP::OpenMP_CXX)
 endif()
@@ -78,6 +82,12 @@ target_link_libraries(pcd_to_map ${PCL_LIBRARIES})
 # ---------------------------------------------------------------------------
 install(TARGETS pcd_relocalizer_node pcd_to_map
   DESTINATION lib/${PROJECT_NAME}
+)
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/teaser_build/teaser/libteaser_registration.so
+  ${CMAKE_CURRENT_BINARY_DIR}/teaser_build/teaser/libteaser_features.so
+  ${CMAKE_CURRENT_BINARY_DIR}/small_gicp_build/libsmall_gicp.so
+  DESTINATION lib
 )
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config

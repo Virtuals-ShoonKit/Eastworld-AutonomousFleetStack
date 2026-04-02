@@ -12,6 +12,12 @@ fleet_streamer:
     stream_type: 0              # 0=Left BGRA
     bitrate: 1500000            # H.264 bitrate (bps)
     iframeinterval: 30          # GOP size (keyframe every N frames)
+    idrinterval: 30             # IDR cadence; shorter recovers faster after loss
+    queue_max_buffers: 1        # keep latest frame only when downstream is slow
+    drop_when_congested: true   # prefer frame drop over added latency
+    rtp_mtu: 1200               # safer over VPN/Wi-Fi and avoids fragmentation
+    rtp_config_interval: -1     # send SPS/PPS with every IDR for robust joins
+    webrtc_latency_ms: 30       # webrtc jitterbuffer target (lower = less delay)
 
   # --- Pose bridge ---
   pose:
