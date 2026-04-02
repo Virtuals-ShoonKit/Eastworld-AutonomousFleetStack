@@ -59,6 +59,8 @@ class ZedWebRTCStreamer:
         self.webrtcbin: Gst.Element | None = None
         self.ws: websockets.WebSocketClientProtocol | None = None
         self._loop = asyncio.get_event_loop()
+        self._offer_pending = False
+        self._answer_received = False
 
     # -- pipeline -----------------------------------------------------------
 
@@ -113,14 +115,29 @@ class ZedWebRTCStreamer:
         self.webrtcbin.connect("on-ice-candidate", self._on_ice_candidate)
         self.webrtcbin.connect("pad-added", self._on_pad_added)
 
-    def _on_negotiation_needed(self, _webrtc):
-        log.info("Negotiation needed -- creating offer")
+    def _request_offer(self, reason: str):
+        if not self.webrtcbin:
+            return
+        if self._offer_pending:
+            return
+        if not _ws_is_open(self.ws):
+            log.info("Skipping offer request (%s): signaling not connected", reason)
+            return
+        self._offer_pending = True
+        log.info("Creating SDP offer (%s)", reason)
         promise = Gst.Promise.new_with_change_func(self._on_offer_created)
         self.webrtcbin.emit("create-offer", None, promise)
 
+    def _on_negotiation_needed(self, _webrtc):
+        self._request_offer("negotiation-needed")
+
     def _on_offer_created(self, promise):
         promise.wait()
+        self._offer_pending = False
         reply = promise.get_reply()
+        if reply is None:
+            log.warning("Offer creation returned no reply")
+            return
         offer = reply.get_value("offer")
         self.webrtcbin.emit("set-local-description", offer, None)
         sdp_text = offer.sdp.as_text()
@@ -145,6 +162,8 @@ class ZedWebRTCStreamer:
 
     def start_pipeline(self):
         self._build_pipeline()
+        self._offer_pending = False
+        self._answer_received = False
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             bus = self.pipeline.get_bus()
@@ -175,6 +194,7 @@ class ZedWebRTCStreamer:
                 raise RuntimeError(f"Camera start failure: {camera_error_text}")
             raise RuntimeError("Failed to start GStreamer pipeline")
         log.info("Pipeline PLAYING")
+        self._request_offer("pipeline-start")
 
     def stop_pipeline(self):
         if self.pipeline:
@@ -194,10 +214,12 @@ class ZedWebRTCStreamer:
         url = f"{self.host_url}/ws/signaling/{self.robot_id}"
         log.info("Connecting to signaling server: %s", url)
         async for ws in websockets.connect(url, ping_interval=10, ping_timeout=30):
+            offer_retry_task: asyncio.Task | None = None
             try:
                 self.ws = ws
                 log.info("Signaling connected")
                 self.start_pipeline()
+                offer_retry_task = asyncio.create_task(self._retry_offer_until_answer())
                 async for raw in ws:
                     msg = json.loads(raw)
                     self._dispatch_signaling(msg)
@@ -208,6 +230,8 @@ class ZedWebRTCStreamer:
                     raise
                 log.exception("WebRTC stream loop failed -- reconnecting")
             finally:
+                if offer_retry_task:
+                    offer_retry_task.cancel()
                 self.stop_pipeline()
                 self.ws = None
 
@@ -215,6 +239,7 @@ class ZedWebRTCStreamer:
         kind = msg.get("kind")
         if kind == "answer":
             log.info("Received SDP answer")
+            self._answer_received = True
             _, sdpmsg = GstSdp.SDPMessage.new_from_text(msg["sdp"])
             answer = GstWebRTC.WebRTCSessionDescription.new(
                 GstWebRTC.WebRTCSDPType.ANSWER, sdpmsg,
@@ -228,6 +253,14 @@ class ZedWebRTCStreamer:
             )
         else:
             log.warning("Unknown signaling message kind: %s", kind)
+
+    async def _retry_offer_until_answer(self):
+        # If viewer connects after robot boot, initial offer may be dropped by relay.
+        while _ws_is_open(self.ws) and not self._answer_received:
+            await asyncio.sleep(2.0)
+            if self._answer_received or not _ws_is_open(self.ws):
+                break
+            self._request_offer("retry-no-answer")
 
     # -- lifecycle ----------------------------------------------------------
 
