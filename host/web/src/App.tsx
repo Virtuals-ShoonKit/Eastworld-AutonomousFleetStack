@@ -14,11 +14,11 @@ export default function App() {
   const { robots, onCloud } = useFleetSocket(WS_URL);
   const robotIds = useMemo(() => Array.from(robots.keys()), [robots]);
 
-  const [backgroundColor, setBackgroundColor] = useState("#070b12");
-  const [pointCloudColor, setPointCloudColor] = useState("#9fd3ff");
-  const [gridColor, setGridColor] = useState("#2a2a4e");
+  const [backgroundColor, setBackgroundColor] = useState("#070707");
+  const [pointCloudColor, setPointCloudColor] = useState("#005aa8");
+  const [gridColor, setGridColor] = useState("#5c5c70");
   const [isControlsOpen, setIsControlsOpen] = useState(false);
-  const [showOriginAxes, setShowOriginAxes] = useState(true);
+  const [showOriginAxes, setShowOriginAxes] = useState(false);
   const [originAxesLength, setOriginAxesLength] = useState(1);
   const [originAxesThickness, setOriginAxesThickness] = useState(0.05);
   const [mapZOffset, setMapZOffset] = useState(0);
