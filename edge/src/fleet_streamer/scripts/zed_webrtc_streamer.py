@@ -2,7 +2,7 @@
 """
 Standalone ZED -> WebRTC streamer for Jetson Orin NX.
 
-Pipeline:  zedsrc -> nvvideoconvert -> nvv4l2h264enc -> rtph264pay -> webrtcbin
+Pipeline:  zedsrc -> videoconvert -> nvvideoconvert -> nvv4l2h264enc -> rtph264pay -> webrtcbin
 Signaling: WebSocket to host fleet server
 
 No ROS dependency -- runs as a plain process alongside the ROS stack.
@@ -123,6 +123,7 @@ class ZedWebRTCStreamer:
         desc = (
             f"zedsrc stream-type={stream_type} camera-resolution={resolution} camera-fps={fps} "
             f"! queue leaky={queue_leaky} max-size-buffers={queue_max_buffers} max-size-bytes=0 max-size-time=0 "
+            "! videoconvert "
             "! nvvideoconvert "
             "! video/x-raw(memory:NVMM),format=NV12 "
             f"! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} idrinterval={idr} "
@@ -138,15 +139,6 @@ class ZedWebRTCStreamer:
         self.webrtcbin.connect("on-negotiation-needed", self._on_negotiation_needed)
         self.webrtcbin.connect("on-ice-candidate", self._on_ice_candidate)
         self.webrtcbin.connect("pad-added", self._on_pad_added)
-
-        # #region agent log
-        self._sink_buf_count = 0
-        for pad in self.webrtcbin.sinkpads:
-            pad.add_probe(Gst.PadProbeType.BUFFER, self._sink_probe_cb, None)
-            log.info("Probe added on webrtcbin pad: %s (direction=%s)", pad.get_name(), pad.get_direction())
-        if not self.webrtcbin.sinkpads:
-            log.warning("webrtcbin has NO sink pads after parse_launch!")
-        # #endregion
 
     def _request_offer(self, reason: str):
         if not self.webrtcbin:
@@ -199,27 +191,6 @@ class ZedWebRTCStreamer:
             self._loop,
         )
 
-    # #region agent log
-    def _sink_probe_cb(self, pad, info, data):
-        self._sink_buf_count += 1
-        if self._sink_buf_count <= 3 or self._sink_buf_count % 300 == 0:
-            log.info("webrtcbin sink probe: buffer #%d", self._sink_buf_count)
-        return Gst.PadProbeReturn.OK
-    # #endregion
-
-    # #region agent log
-    def _on_bus_error(self, _bus, msg):
-        err, dbg = msg.parse_error()
-        log.error("BUS ERROR from %s: %s (%s)", msg.src.get_name() if msg.src else "?", err, dbg)
-
-    def _on_bus_warning(self, _bus, msg):
-        warn, dbg = msg.parse_warning()
-        log.warning("BUS WARNING from %s: %s (%s)", msg.src.get_name() if msg.src else "?", warn, dbg)
-
-    def _on_bus_eos(self, _bus, _msg):
-        log.warning("BUS EOS received!")
-    # #endregion
-
     def _on_pad_added(self, _webrtc, pad):
         log.debug("Pad added: %s", pad.get_name())
 
@@ -254,16 +225,13 @@ class ZedWebRTCStreamer:
                         dbg,
                     )
             if camera_start_failed:
-                raise RuntimeError(f"Camera start failure: {camera_error_text}")
+                raise RuntimeError(
+                    f"Camera start failure: {camera_error_text}. "
+                    "The ZED SDK allows only one process to open the camera — stop "
+                    "zed_node / eastworld_bringup (or any other ZED consumer) first."
+                )
             raise RuntimeError("Failed to start GStreamer pipeline")
         log.info("Pipeline PLAYING")
-        # #region agent log
-        bus = self.pipeline.get_bus()
-        bus.add_signal_watch()
-        bus.connect("message::error", self._on_bus_error)
-        bus.connect("message::warning", self._on_bus_warning)
-        bus.connect("message::eos", self._on_bus_eos)
-        # #endregion
         self._request_offer("pipeline-start")
 
     def stop_pipeline(self):
@@ -283,35 +251,45 @@ class ZedWebRTCStreamer:
     async def _handle_signaling(self):
         url = f"{self.host_url}/ws/signaling/{self.robot_id}"
         log.info("Connecting to signaling server: %s", url)
-        async for ws in websockets.connect(url, ping_interval=10, ping_timeout=30):
+        while True:
             offer_retry_task: asyncio.Task | None = None
-            # #region agent log
-            monitor_task: asyncio.Task | None = None
-            # #endregion
             try:
-                self.ws = ws
-                log.info("Signaling connected")
-                self.start_pipeline()
-                offer_retry_task = asyncio.create_task(self._retry_offer_until_answer())
-                # #region agent log
-                monitor_task = asyncio.create_task(self._monitor_webrtc_state())
-                # #endregion
-                async for raw in ws:
-                    msg = json.loads(raw)
-                    self._dispatch_signaling(msg)
+                async with websockets.connect(
+                    url, ping_interval=10, ping_timeout=30,
+                ) as ws:
+                    self.ws = ws
+                    log.info("Signaling connected")
+                    try:
+                        self.start_pipeline()
+                    except RuntimeError as exc:
+                        if "Camera start failure" in str(exc):
+                            log.error("%s", exc)
+                            return
+                        raise
+                    offer_retry_task = asyncio.create_task(
+                        self._retry_offer_until_answer(),
+                    )
+                    try:
+                        async for raw in ws:
+                            msg = json.loads(raw)
+                            self._dispatch_signaling(msg)
+                    except websockets.ConnectionClosed:
+                        log.warning("Signaling connection lost -- reconnecting")
+                    finally:
+                        if offer_retry_task:
+                            offer_retry_task.cancel()
+                            try:
+                                await offer_retry_task
+                            except asyncio.CancelledError:
+                                pass
+                        self.stop_pipeline()
+                        self.ws = None
             except websockets.ConnectionClosed:
                 log.warning("Signaling connection lost -- reconnecting")
-            except Exception as exc:
-                if "Camera start failure:" in str(exc):
-                    raise
+            except Exception:
                 log.exception("WebRTC stream loop failed -- reconnecting")
+                await asyncio.sleep(1.0)
             finally:
-                if offer_retry_task:
-                    offer_retry_task.cancel()
-                # #region agent log
-                if monitor_task:
-                    monitor_task.cancel()
-                # #endregion
                 self.stop_pipeline()
                 self.ws = None
 
@@ -320,15 +298,6 @@ class ZedWebRTCStreamer:
         if kind == "answer":
             self._answer_received = True
             sdp_text = msg["sdp"]
-            # #region agent log
-            has_fmtp = "a=fmtp:96" in sdp_text
-            has_h264 = "H264" in sdp_text
-            has_video = "m=video" in sdp_text
-            local_desc = self.webrtcbin.get_property("local-description")
-            local_has_fmtp = "a=fmtp:96" in local_desc.sdp.as_text() if local_desc else False
-            log.info("Received SDP answer: size=%d has_video=%s has_h264=%s has_fmtp=%s local_has_fmtp=%s",
-                     len(sdp_text), has_video, has_h264, has_fmtp, local_has_fmtp)
-            # #endregion
             _, sdpmsg = GstSdp.SDPMessage.new_from_text(sdp_text)
             answer = GstWebRTC.WebRTCSessionDescription.new(
                 GstWebRTC.WebRTCSDPType.ANSWER, sdpmsg,
@@ -355,25 +324,6 @@ class ZedWebRTCStreamer:
                 await self._send_signaling({"kind": "offer", "sdp": self._last_offer_sdp})
             else:
                 self._request_offer("retry-no-answer")
-
-    # #region agent log
-    async def _monitor_webrtc_state(self):
-        """Periodically log webrtcbin and pipeline state for diagnostics."""
-        await asyncio.sleep(1.0)
-        for _ in range(20):
-            if not self.webrtcbin or not self.pipeline:
-                break
-            try:
-                ice = self.webrtcbin.get_property("ice-connection-state")
-                conn = self.webrtcbin.get_property("connection-state")
-                _, state, pending = self.pipeline.get_state(0)
-                log.info("Monitor: ice=%s conn=%s pipeline=%s pending=%s answer=%s bufs=%d",
-                         ice, conn, state, pending, self._answer_received,
-                         getattr(self, '_sink_buf_count', 0))
-            except Exception as e:
-                log.warning("Monitor error: %s", e)
-            await asyncio.sleep(3.0)
-    # #endregion
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -444,6 +394,16 @@ def main():
         pass
     finally:
         streamer.stop_pipeline()
+        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+        for t in pending:
+            t.cancel()
+        if pending:
+            try:
+                loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True),
+                )
+            except RuntimeError:
+                pass
         loop.close()
 
 

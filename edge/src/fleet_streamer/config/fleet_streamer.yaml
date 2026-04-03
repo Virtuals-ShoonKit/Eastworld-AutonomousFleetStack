@@ -7,7 +7,8 @@ fleet_streamer:
 
   # --- ZED WebRTC settings ---
   zed:
-    camera_resolution: 5        # 0=HD2K, 1=HD1080, 3=HD720, 5=VGA
+    # Match a mode your camera supports (ZED-M: HD720 is typical). Only one process may open the ZED (not zed_node + zedsrc).
+    camera_resolution: 3        # 0=HD2K, 1=HD1080, 3=HD720, 5=VGA
     camera_fps: 30
     stream_type: 0              # 0=Left BGRA
     bitrate: 1500000            # H.264 bitrate (bps)

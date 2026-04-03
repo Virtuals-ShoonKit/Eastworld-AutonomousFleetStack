@@ -72,6 +72,17 @@ def generate_launch_description():
         }],
     )
 
+    telem_bridge = Node(
+        package="fleet_streamer",
+        executable="telem_bridge.py",
+        name="telem_bridge",
+        output="screen",
+        parameters=[{
+            "robot_id": LaunchConfiguration("robot_id"),
+            "host_url": LaunchConfiguration("host_url"),
+        }],
+    )
+
     return LaunchDescription([
         robot_id_arg,
         host_url_arg,
@@ -79,4 +90,5 @@ def generate_launch_description():
         zed_webrtc,
         pose_bridge,
         cloud_bridge,
+        telem_bridge,
     ])
