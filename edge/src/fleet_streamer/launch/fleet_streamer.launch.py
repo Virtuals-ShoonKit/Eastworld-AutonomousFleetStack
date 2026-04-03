@@ -15,14 +15,22 @@ def generate_launch_description():
     default_config = os.path.join(pkg_dir, "config", "fleet_streamer.yaml")
     default_robot_id = "robot_0"
     default_host_url = "ws://192.168.1.100:8800"
+    pose_cfg = {"source_frame": "base_link", "target_frame": "map", "rate_hz": 50}
+    cloud_cfg = {
+        "input_topic": "/cloud_registered",
+        "rate_hz": 5,
+        "draco_quantization_bits": 11,
+        "use_zstd": False,
+    }
     try:
         with open(default_config, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         fleet_cfg = cfg.get("fleet_streamer", {})
         default_robot_id = str(fleet_cfg.get("robot_id", default_robot_id))
         default_host_url = str(fleet_cfg.get("host_url", default_host_url))
+        pose_cfg.update(fleet_cfg.get("pose", {}))
+        cloud_cfg.update(fleet_cfg.get("cloud", {}))
     except Exception:
-        # Fall back to hardcoded defaults if config is unavailable.
         pass
 
     robot_id_arg = DeclareLaunchArgument(
@@ -48,6 +56,8 @@ def generate_launch_description():
         ],
         output="screen",
         name="zed_webrtc_streamer",
+        respawn=True,
+        respawn_delay=5.0,
     )
 
     pose_bridge = Node(
@@ -58,6 +68,9 @@ def generate_launch_description():
         parameters=[{
             "robot_id": LaunchConfiguration("robot_id"),
             "host_url": LaunchConfiguration("host_url"),
+            "source_frame": str(pose_cfg["source_frame"]),
+            "target_frame": str(pose_cfg["target_frame"]),
+            "rate_hz": float(pose_cfg["rate_hz"]),
         }],
     )
 
@@ -69,6 +82,10 @@ def generate_launch_description():
         parameters=[{
             "robot_id": LaunchConfiguration("robot_id"),
             "host_url": LaunchConfiguration("host_url"),
+            "input_topic": str(cloud_cfg["input_topic"]),
+            "rate_hz": float(cloud_cfg["rate_hz"]),
+            "draco_quantization_bits": int(cloud_cfg["draco_quantization_bits"]),
+            "use_zstd": bool(cloud_cfg["use_zstd"]),
         }],
     )
 

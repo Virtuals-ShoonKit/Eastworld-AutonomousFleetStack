@@ -79,7 +79,7 @@ export function FleetViewer3D({
 
   return (
     <Canvas
-      camera={{ position: [5, -10, 40], fov: 60, near: 0.1, far: 1000, up: [0, 0, 1] }}
+      camera={{ position: [-10, 5, 40], fov: 60, near: 0.1, far: 1000, up: [0, 0, 1] }}
       style={{ width: "100%", height: "100%" }}
     >
       <color attach="background" args={[backgroundColor]} />

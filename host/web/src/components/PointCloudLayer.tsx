@@ -105,7 +105,7 @@ export function PointCloudLayer({
       const radius = sphere.radius;
 
       // Top-down view with some tilt for 3D perspective
-      camera.position.set(center.x, center.y - radius * 0.3, center.z + radius * 1.5);
+      camera.position.set(center.x - radius * 0.3, center.y, center.z + radius * 1.5);
       camera.lookAt(center.x, center.y, center.z);
       camera.updateProjectionMatrix();
 

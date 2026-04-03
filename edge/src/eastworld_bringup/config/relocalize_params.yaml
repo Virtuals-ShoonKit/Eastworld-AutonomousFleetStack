@@ -1,11 +1,34 @@
 pcd_relocalizer:
   ros__parameters:
     map_pcd_path: ""
-    voxel_size: 0.5
+    cloud_topic: /cloud_registered
+    tf_parent_frame: map
+    tf_child_frame: odom
+    voxel_size: 0.3
+    accumulate_warmup_skip_s: 0.0
     accumulate_duration: 3.0
     fpfh_radius: 1.5
     normal_radius: 1.0
-    teaser_noise_bound: 0.1
-    gicp_max_correspondence_distance: 2.0
+
+    # TEASER++ global registration
+    teaser_noise_bound: 0.2
+    teaser_cbar2: 1.0
+    teaser_rotation_max_iterations: 100
+    teaser_rotation_cost_threshold: 0.005
+
+    # FPFH matcher — crosscheck and tuple test OFF gives more correspondences
+    min_fpfh_correspondences: 40
+    matcher_similarity_threshold: 0.9
+    matcher_use_crosscheck: false
+    matcher_use_tuple_test: false
+    matcher_tuple_scale: 0.95
+
+    # Yaw hypothesis sweep (GICP tries ±step increments around TEASER++ guess)
+    yaw_hypothesis_step_deg: 45.0
+
+    # GICP refinement
+    gicp_max_correspondence_distance: 3.0
+    gicp_max_iterations: 30
     gicp_num_threads: 4
+
     auto_relocalize: true

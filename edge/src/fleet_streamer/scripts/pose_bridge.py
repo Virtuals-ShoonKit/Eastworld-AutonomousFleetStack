@@ -2,8 +2,9 @@
 """
 ROS 2 TF -> WebSocket pose bridge.
 
-Listens for the odom->base_link transform from FAST-LIVO2 and streams
-compact msgpack-encoded pose messages to the host fleet server at ~50 Hz.
+Listens for the map->base_link transform (composed from map->odom via
+relocalization and odom->base_link via FAST-LIVO2) and streams compact
+msgpack-encoded pose messages to the host fleet server at ~50 Hz.
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ class PoseBridge(Node):
         self.declare_parameter("robot_id", "robot_0")
         self.declare_parameter("host_url", "ws://192.168.1.100:8800")
         self.declare_parameter("source_frame", "base_link")
-        self.declare_parameter("target_frame", "odom")
+        self.declare_parameter("target_frame", "map")
         self.declare_parameter("rate_hz", 50.0)
 
         self.robot_id = self.get_parameter("robot_id").value

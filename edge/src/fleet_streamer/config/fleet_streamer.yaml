@@ -23,7 +23,7 @@ fleet_streamer:
   # --- Pose bridge ---
   pose:
     source_frame: "base_link"
-    target_frame: "odom"
+    target_frame: "map"
     rate_hz: 50
 
   # --- Cloud bridge ---

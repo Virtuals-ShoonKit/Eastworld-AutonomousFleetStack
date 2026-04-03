@@ -21,8 +21,9 @@ import numpy as np
 import rclpy
 import websockets
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from sensor_msgs.msg import PointCloud2
+from std_msgs.msg import Bool
 import sensor_msgs_py.point_cloud2 as pc2
 
 _shared_dir = None
@@ -84,18 +85,30 @@ class CloudBridge(Node):
 
         self._zstd_comp = zstd.ZstdCompressor(level=3) if self.use_zstd else None
 
-        # Match FAST-LIVO2 /cloud_registered publisher: rclcpp::QoS(KeepLast(100)) defaults to RELIABLE.
-        # BEST_EFFORT here will not match a RELIABLE publisher, so the bridge receives zero clouds.
-        qos = QoSProfile(
+        self._relocalized = False
+        reloc_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.create_subscription(Bool, "/relocalization_status", self._on_reloc_status, reloc_qos)
+
+        cloud_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=10,
         )
-        self.create_subscription(PointCloud2, input_topic, self._on_cloud, qos)
+        self.create_subscription(PointCloud2, input_topic, self._on_cloud, cloud_qos)
         self.get_logger().info(
             f"CloudBridge: {input_topic} @ {1/self.min_period:.0f}Hz "
             f"(draco q={self.quant_bits}, zstd={self.use_zstd}) -> {self.host_url}"
         )
+
+    def _on_reloc_status(self, msg: Bool):
+        if msg.data and not self._relocalized:
+            self.get_logger().info("Relocalization complete — enabling Draco compression")
+        self._relocalized = msg.data
 
     def _on_cloud(self, msg: PointCloud2):
         now = time.monotonic()
@@ -111,14 +124,17 @@ class CloudBridge(Node):
             return
 
         num_points = len(points)
-        draco_bytes = DracoPy.encode(
-            points,
-            quantization_bits=self.quant_bits,
-            compression_level=1,
-        )
 
-        if self._zstd_comp:
-            draco_bytes = self._zstd_comp.compress(draco_bytes)
+        if self._relocalized:
+            draco_bytes = DracoPy.encode(
+                points,
+                quantization_bits=self.quant_bits,
+                compression_level=1,
+            )
+            if self._zstd_comp:
+                draco_bytes = self._zstd_comp.compress(draco_bytes)
+        else:
+            draco_bytes = points.tobytes()
 
         cloud_msg = CloudMsg(
             robot_id=self.robot_id,

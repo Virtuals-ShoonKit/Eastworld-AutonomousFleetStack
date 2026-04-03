@@ -71,6 +71,10 @@ def _ws_is_open(ws) -> bool:
 # GStreamer pipeline
 # ---------------------------------------------------------------------------
 
+_MAX_RESTART_DELAY = 30.0
+_INITIAL_RESTART_DELAY = 2.0
+
+
 class ZedWebRTCStreamer:
     """Manages the GStreamer pipeline and WebSocket signaling."""
 
@@ -85,6 +89,7 @@ class ZedWebRTCStreamer:
         self._offer_pending = False
         self._answer_received = False
         self._last_offer_sdp: str | None = None
+        self._pipeline_error: asyncio.Event | None = None
 
     # -- pipeline -----------------------------------------------------------
 
@@ -122,10 +127,11 @@ class ZedWebRTCStreamer:
         queue_leaky = "downstream" if drop_when_congested else "no"
         desc = (
             f"zedsrc stream-type={stream_type} camera-resolution={resolution} camera-fps={fps} "
-            f"! queue leaky={queue_leaky} max-size-buffers={queue_max_buffers} max-size-bytes=0 max-size-time=0 "
+            f"! queue max-size-buffers={queue_max_buffers + 1} max-size-bytes=0 max-size-time=0 "
             "! videoconvert "
             "! nvvideoconvert "
             "! video/x-raw(memory:NVMM),format=NV12 "
+            f"! queue leaky={queue_leaky} max-size-buffers={queue_max_buffers} max-size-bytes=0 max-size-time=0 "
             f"! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} idrinterval={idr} "
             "insert-sps-pps=true insert-aud=true maxperf-enable=true preset-level=1 control-rate=1 num-B-Frames=0 "
             f"! rtph264pay config-interval={rtp_config_interval} aggregate-mode=zero-latency mtu={rtp_mtu} pt=96 "
@@ -194,14 +200,36 @@ class ZedWebRTCStreamer:
     def _on_pad_added(self, _webrtc, pad):
         log.debug("Pad added: %s", pad.get_name())
 
+    def _on_bus_message(self, bus, message):
+        """Handle GStreamer bus messages; flag fatal errors for restart."""
+        if message.type == Gst.MessageType.ERROR:
+            err, dbg = message.parse_error()
+            src_name = message.src.get_name() if message.src else "unknown"
+            log.error("Pipeline bus ERROR from %s: %s (%s)", src_name, err, dbg)
+            if self._pipeline_error is not None:
+                self._loop.call_soon_threadsafe(self._pipeline_error.set)
+        elif message.type == Gst.MessageType.WARNING:
+            warn, dbg = message.parse_warning()
+            src_name = message.src.get_name() if message.src else "unknown"
+            log.warning("Pipeline bus WARNING from %s: %s (%s)", src_name, warn, dbg)
+        elif message.type == Gst.MessageType.EOS:
+            log.warning("Pipeline received EOS")
+            if self._pipeline_error is not None:
+                self._loop.call_soon_threadsafe(self._pipeline_error.set)
+        return True
+
     def start_pipeline(self):
         self._build_pipeline()
         self._offer_pending = False
         self._answer_received = False
+
+        bus = self.pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message", self._on_bus_message)
+
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
-            bus = self.pipeline.get_bus()
-            msg = bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.WARNING) if bus else None
+            msg = bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.WARNING)
             camera_start_failed = False
             camera_error_text = ""
             if msg:
@@ -236,6 +264,9 @@ class ZedWebRTCStreamer:
 
     def stop_pipeline(self):
         if self.pipeline:
+            bus = self.pipeline.get_bus()
+            if bus:
+                bus.remove_signal_watch()
             self.pipeline.set_state(Gst.State.NULL)
             log.info("Pipeline stopped")
         self.webrtcbin = None
@@ -251,8 +282,10 @@ class ZedWebRTCStreamer:
     async def _handle_signaling(self):
         url = f"{self.host_url}/ws/signaling/{self.robot_id}"
         log.info("Connecting to signaling server: %s", url)
+        restart_delay = _INITIAL_RESTART_DELAY
         while True:
             offer_retry_task: asyncio.Task | None = None
+            self._pipeline_error = asyncio.Event()
             try:
                 async with websockets.connect(
                     url, ping_interval=10, ping_timeout=30,
@@ -266,13 +299,33 @@ class ZedWebRTCStreamer:
                             log.error("%s", exc)
                             return
                         raise
+                    restart_delay = _INITIAL_RESTART_DELAY
                     offer_retry_task = asyncio.create_task(
                         self._retry_offer_until_answer(),
                     )
+                    pipeline_watch = asyncio.create_task(
+                        self._pipeline_error.wait(),
+                    )
                     try:
-                        async for raw in ws:
-                            msg = json.loads(raw)
-                            await self._dispatch_signaling(msg)
+                        recv_task: asyncio.Task | None = None
+                        while True:
+                            if recv_task is None or recv_task.done():
+                                recv_task = asyncio.create_task(ws.recv())
+                            done, _ = await asyncio.wait(
+                                [recv_task, pipeline_watch],
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                            if pipeline_watch in done:
+                                log.warning(
+                                    "Pipeline error detected — restarting in %.1fs",
+                                    restart_delay,
+                                )
+                                recv_task.cancel()
+                                break
+                            for task in done:
+                                raw = task.result()
+                                msg = json.loads(raw)
+                                await self._dispatch_signaling(msg)
                     except websockets.ConnectionClosed:
                         log.warning("Signaling connection lost -- reconnecting")
                     finally:
@@ -288,10 +341,13 @@ class ZedWebRTCStreamer:
                 log.warning("Signaling connection lost -- reconnecting")
             except Exception:
                 log.exception("WebRTC stream loop failed -- reconnecting")
-                await asyncio.sleep(1.0)
             finally:
                 self.stop_pipeline()
                 self.ws = None
+                self._pipeline_error = None
+            log.info("Waiting %.1fs before restart …", restart_delay)
+            await asyncio.sleep(restart_delay)
+            restart_delay = min(restart_delay * 1.5, _MAX_RESTART_DELAY)
 
     async def _dispatch_signaling(self, msg: dict):
         kind = msg.get("kind")
