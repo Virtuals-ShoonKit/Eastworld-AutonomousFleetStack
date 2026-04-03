@@ -12,7 +12,6 @@ interface Props {
   backgroundColor: string;
   pointCloudColor: string;
   gridColor: string;
-  randomizeLiveCloud: boolean;
   showOriginAxes: boolean;
   originAxesLength: number;
   originAxesThickness: number;
@@ -71,7 +70,6 @@ export function FleetViewer3D({
   backgroundColor,
   pointCloudColor,
   gridColor,
-  randomizeLiveCloud,
   showOriginAxes,
   originAxesLength,
   originAxesThickness,
@@ -109,7 +107,6 @@ export function FleetViewer3D({
         onCloudRegister={onCloudRegister}
         robots={robots}
         pointCloudColor={pointCloudColor}
-        randomizeLiveCloud={randomizeLiveCloud}
         mapZOffset={mapZOffset}
       />
 

@@ -18,8 +18,13 @@ interface Props {
   onCloudRegister: (cb: (cloud: CloudData) => void) => () => void;
   robots: Map<string, RobotState>;
   pointCloudColor: string;
-  randomizeLiveCloud: boolean;
   mapZOffset: number;
+}
+
+function robotIdToColor(id: string): THREE.Color {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return new THREE.Color().setHSL((h % 360) / 360, 0.75, 0.62);
 }
 
 interface LiveCloudSnapshot {
@@ -64,7 +69,6 @@ export function PointCloudLayer({
   onCloudRegister,
   robots,
   pointCloudColor,
-  randomizeLiveCloud,
   mapZOffset,
 }: Props) {
   const mapPointsRef = useRef<THREE.Points | null>(null);
@@ -159,9 +163,7 @@ export function PointCloudLayer({
           const filteredGeometry = pose
             ? filterCloudByRange(geometry, pose.p)
             : geometry;
-          const liveColor = randomizeLiveCloud
-            ? new THREE.Color().setHSL(Math.random(), 0.75, 0.62)
-            : pointCloudColor;
+          const liveColor = robotIdToColor(cloud.r);
           const material = new THREE.PointsMaterial({
             size: 0.06,
             color: liveColor,
@@ -204,7 +206,7 @@ export function PointCloudLayer({
       }
       liveSnapshotsRef.current = [];
     };
-  }, [dracoLoader, onCloudRegister, pointCloudColor, randomizeLiveCloud]);
+  }, [dracoLoader, onCloudRegister]);
 
   useFrame(() => {
     const now = Date.now();

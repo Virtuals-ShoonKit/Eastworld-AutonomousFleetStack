@@ -18,25 +18,38 @@ const EMPTY_STATS: NetworkStats = {
   jitterMs: null,
 };
 
-/**
- * Establishes a WebRTC connection to a single robot's video stream
- * via the host signaling server.
- */
-export function useRobotWebRTC(robotId: string, signalingUrl: string) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [debugInfo, setDebugInfo] = useState("init");
-  const [networkStats, setNetworkStats] = useState<NetworkStats>(EMPTY_STATS);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const prevBytesRef = useRef<{ bytes: number; ts: number } | null>(null);
+// ---------------------------------------------------------------------------
+// Connection pool – keeps WebRTC peer connections alive across React
+// component unmount / remount cycles (dock changes, maximize, float, etc.).
+// A connection is only torn down if no consumer re-acquires it within
+// DISPOSE_DELAY_MS after the last consumer releases it.
+// ---------------------------------------------------------------------------
 
-  const pollStats = useCallback(async () => {
-    const pc = pcRef.current;
-    if (!pc || pc.connectionState !== "connected") return;
+interface PoolEntry {
+  pc: RTCPeerConnection;
+  ws: WebSocket;
+  stream: MediaStream | null;
+  connected: boolean;
+  stats: NetworkStats;
+  refCount: number;
+  disposeTimer: ReturnType<typeof setTimeout> | null;
+  prevBytes: { bytes: number; ts: number } | null;
+  statsTimer: ReturnType<typeof setInterval> | null;
+  subscribers: Set<() => void>;
+}
 
-    try {
-      const stats = await pc.getStats();
+const pool = new Map<string, PoolEntry>();
+const DISPOSE_DELAY_MS = 5000;
+
+function pkey(robotId: string, signalingUrl: string) {
+  return `${robotId}\0${signalingUrl}`;
+}
+
+function pollEntryStats(entry: PoolEntry) {
+  const { pc } = entry;
+  if (pc.connectionState !== "connected") return;
+  pc.getStats()
+    .then((stats) => {
       let rttMs: number | null = null;
       let packetsReceived = 0;
       let packetsLost = 0;
@@ -63,118 +76,198 @@ export function useRobotWebRTC(robotId: string, signalingUrl: string) {
 
       let bitrateKbps: number | null = null;
       const now = performance.now();
-      const prev = prevBytesRef.current;
+      const prev = entry.prevBytes;
       if (prev && bytesReceived > prev.bytes) {
         const dtSec = (now - prev.ts) / 1000;
         if (dtSec > 0) {
-          bitrateKbps = Math.round(((bytesReceived - prev.bytes) * 8) / dtSec / 1000);
+          bitrateKbps = Math.round(
+            ((bytesReceived - prev.bytes) * 8) / dtSec / 1000
+          );
         }
       }
-      prevBytesRef.current = { bytes: bytesReceived, ts: now };
+      entry.prevBytes = { bytes: bytesReceived, ts: now };
+      entry.stats = {
+        rttMs,
+        bitrateKbps,
+        packetsReceived,
+        packetsLost,
+        framesDecoded,
+        jitterMs,
+      };
+      entry.subscribers.forEach((fn) => fn());
+    })
+    .catch(() => {});
+}
 
-      setNetworkStats({ rttMs, bitrateKbps, packetsReceived, packetsLost, framesDecoded, jitterMs });
-    } catch {
-      // stats unavailable
+function acquireConnection(
+  robotId: string,
+  signalingUrl: string
+): PoolEntry {
+  const key = pkey(robotId, signalingUrl);
+  const existing = pool.get(key);
+  if (existing) {
+    if (existing.disposeTimer !== null) {
+      clearTimeout(existing.disposeTimer);
+      existing.disposeTimer = null;
     }
-  }, []);
+    existing.refCount++;
+    return existing;
+  }
+
+  const wsUrl = `${signalingUrl}/ws/signaling/${robotId}?role=viewer`;
+  const ws = new WebSocket(wsUrl);
+  const pendingRemoteIce: RTCIceCandidateInit[] = [];
+  let remoteDescriptionSet = false;
+
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
+
+  const entry: PoolEntry = {
+    pc,
+    ws,
+    stream: null,
+    connected: false,
+    stats: { ...EMPTY_STATS },
+    refCount: 1,
+    disposeTimer: null,
+    prevBytes: null,
+    statsTimer: null,
+    subscribers: new Set(),
+  };
+
+  const notify = () => entry.subscribers.forEach((fn) => fn());
+
+  pc.addTransceiver("video", { direction: "recvonly" });
+
+  pc.ontrack = (ev) => {
+    const stream = ev.streams[0];
+    if (!stream) return;
+    entry.stream = stream;
+    entry.connected = true;
+    notify();
+  };
+
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate && ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          kind: "ice",
+          candidate: ev.candidate.candidate,
+          sdpMLineIndex: ev.candidate.sdpMLineIndex,
+        })
+      );
+    }
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    entry.connected =
+      pc.iceConnectionState === "connected" ||
+      pc.iceConnectionState === "completed";
+    notify();
+  };
+
+  ws.onmessage = async (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.kind === "offer") {
+        await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
+        remoteDescriptionSet = true;
+        while (pendingRemoteIce.length > 0) {
+          const c = pendingRemoteIce.shift();
+          if (c) await pc.addIceCandidate(c);
+        }
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ kind: "answer", sdp: answer.sdp }));
+      } else if (msg.kind === "ice") {
+        const candidate: RTCIceCandidateInit = {
+          candidate: msg.candidate,
+          sdpMLineIndex: msg.sdpMLineIndex,
+        };
+        if (!remoteDescriptionSet) {
+          pendingRemoteIce.push(candidate);
+        } else {
+          await pc.addIceCandidate(candidate);
+        }
+      }
+    } catch (err) {
+      console.warn(`WebRTC signaling error for ${robotId}:`, err);
+    }
+  };
+
+  entry.statsTimer = setInterval(() => pollEntryStats(entry), 2000);
+
+  pool.set(key, entry);
+  return entry;
+}
+
+function releaseConnection(robotId: string, signalingUrl: string) {
+  const key = pkey(robotId, signalingUrl);
+  const entry = pool.get(key);
+  if (!entry) return;
+  entry.refCount--;
+  if (entry.refCount <= 0 && entry.disposeTimer === null) {
+    entry.disposeTimer = setTimeout(() => {
+      if (entry.statsTimer !== null) clearInterval(entry.statsTimer);
+      entry.pc.close();
+      entry.ws.close();
+      pool.delete(key);
+    }, DISPOSE_DELAY_MS);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// React hook – thin wrapper over the pool
+// ---------------------------------------------------------------------------
+
+export function useRobotWebRTC(robotId: string, signalingUrl: string) {
+  const [, bump] = useState(0);
+  const entryRef = useRef<PoolEntry | null>(null);
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     if (!robotId) return;
+    const entry = acquireConnection(robotId, signalingUrl);
+    entryRef.current = entry;
 
-    const url = `${signalingUrl}/ws/signaling/${robotId}?role=viewer`;
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-    const pendingRemoteIce: RTCIceCandidateInit[] = [];
-    let remoteDescriptionSet = false;
-
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-    pcRef.current = pc;
-    prevBytesRef.current = null;
-
-    pc.addTransceiver("video", { direction: "recvonly" });
-
-    pc.ontrack = (ev) => {
-      setDebugInfo(prev => prev + ` | track:${ev.track.kind}`);
-      if (videoRef.current && ev.streams[0]) {
-        videoRef.current.srcObject = ev.streams[0];
-        videoRef.current.play().catch(() => {});
-        setConnected(true);
-      }
-    };
-
-    pc.onicecandidate = (ev) => {
-      if (ev.candidate && ws.readyState === WebSocket.OPEN) {
-        ws.send(
-          JSON.stringify({
-            kind: "ice",
-            candidate: ev.candidate.candidate,
-            sdpMLineIndex: ev.candidate.sdpMLineIndex,
-          })
-        );
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      setDebugInfo(prev => prev + ` | conn:${pc.connectionState}`);
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      setDebugInfo(prev => prev + ` | ice:${pc.iceConnectionState}`);
-      setConnected(
-        pc.iceConnectionState === "connected" ||
-          pc.iceConnectionState === "completed"
-      );
-    };
-
-    ws.onmessage = async (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.kind === "offer") {
-          await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
-          remoteDescriptionSet = true;
-          while (pendingRemoteIce.length > 0) {
-            const candidate = pendingRemoteIce.shift();
-            if (candidate) {
-              await pc.addIceCandidate(candidate);
-            }
-          }
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          ws.send(JSON.stringify({ kind: "answer", sdp: answer.sdp }));
-        } else if (msg.kind === "ice") {
-          const candidate = {
-            candidate: msg.candidate,
-            sdpMLineIndex: msg.sdpMLineIndex,
-          } satisfies RTCIceCandidateInit;
-          if (!remoteDescriptionSet) {
-            pendingRemoteIce.push(candidate);
-          } else {
-            await pc.addIceCandidate(candidate);
-          }
+    const sub = () => {
+      bump((n) => n + 1);
+      const el = videoElRef.current;
+      if (el && entry.stream) {
+        if (el.srcObject !== entry.stream) {
+          el.srcObject = entry.stream;
+          el.play().catch(() => {});
         }
-      } catch (err) {
-        console.warn(`WebRTC signaling error for ${robotId}:`, err);
       }
     };
+    entry.subscribers.add(sub);
+    sub();
 
     return () => {
-      pc.close();
-      ws.close();
-      setConnected(false);
-      setNetworkStats(EMPTY_STATS);
-      prevBytesRef.current = null;
+      entry.subscribers.delete(sub);
+      entryRef.current = null;
+      releaseConnection(robotId, signalingUrl);
     };
   }, [robotId, signalingUrl]);
 
-  // Periodic stats poller (every 2s while connected)
-  useEffect(() => {
-    if (!connected) return;
-    pollStats();
-    const id = setInterval(pollStats, 2000);
-    return () => clearInterval(id);
-  }, [connected, pollStats]);
+  const videoRef = useCallback((el: HTMLVideoElement | null) => {
+    if (videoElRef.current && videoElRef.current !== el) {
+      videoElRef.current.srcObject = null;
+    }
+    videoElRef.current = el;
+    const entry = entryRef.current;
+    if (el && entry?.stream) {
+      el.srcObject = entry.stream;
+      el.play().catch(() => {});
+    }
+  }, []);
 
-  return { videoRef, connected, debugInfo, networkStats };
+  const entry = entryRef.current;
+  return {
+    videoRef,
+    connected: entry?.connected ?? false,
+    debugInfo: "",
+    networkStats: entry?.stats ?? EMPTY_STATS,
+  };
 }

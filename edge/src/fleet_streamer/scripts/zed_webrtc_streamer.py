@@ -272,7 +272,7 @@ class ZedWebRTCStreamer:
                     try:
                         async for raw in ws:
                             msg = json.loads(raw)
-                            self._dispatch_signaling(msg)
+                            await self._dispatch_signaling(msg)
                     except websockets.ConnectionClosed:
                         log.warning("Signaling connection lost -- reconnecting")
                     finally:
@@ -293,7 +293,7 @@ class ZedWebRTCStreamer:
                 self.stop_pipeline()
                 self.ws = None
 
-    def _dispatch_signaling(self, msg: dict):
+    async def _dispatch_signaling(self, msg: dict):
         kind = msg.get("kind")
         if kind == "answer":
             self._answer_received = True
@@ -311,6 +311,13 @@ class ZedWebRTCStreamer:
                 msg["sdpMLineIndex"],
                 msg["candidate"],
             )
+        elif kind == "viewer-joined":
+            log.info("New viewer connected, resending offer")
+            self._answer_received = False
+            if self._last_offer_sdp:
+                await self._send_signaling({"kind": "offer", "sdp": self._last_offer_sdp})
+            else:
+                self._request_offer("viewer-joined")
         else:
             log.warning("Unknown signaling message kind: %s", kind)
 

@@ -5,7 +5,8 @@ Forwards SDP offers/answers and ICE candidates between edge robots
 (GStreamer webrtcbin) and web viewer browsers (RTCPeerConnection).
 
 The relay buffers the robot's ICE candidates so that a viewer connecting
-after the robot still receives them immediately.
+after the robot still receives them immediately.  When a new viewer joins,
+the relay also notifies the robot so it can send a fresh SDP offer.
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ class SignalingRelay:
 
     def __init__(self):
         self._peers: dict[str, dict[str, WebSocketResponse]] = defaultdict(dict)
-        # robot_id -> [ice_message_str, ...]
         self._ice_buffer: dict[str, list[str]] = defaultdict(list)
 
     def register(self, robot_id: str, role: str, ws: WebSocketResponse):
@@ -46,13 +46,18 @@ class SignalingRelay:
             self._ice_buffer.pop(robot_id, None)
         log.info("Signaling: %s unregistered %s", robot_id, role)
 
-    async def replay_ice_buffer(self, robot_id: str, viewer_ws: WebSocketResponse):
-        """Send buffered robot ICE candidates to a newly connected viewer.
+    async def notify_robot_viewer_joined(self, robot_id: str):
+        """Tell the robot a (new) viewer just connected so it can re-offer."""
+        peers = self._peers.get(robot_id, {})
+        robot_ws = peers.get("robot")
+        if robot_ws and not robot_ws.closed:
+            self._ice_buffer.pop(robot_id, None)
+            msg = json.dumps({"kind": "viewer-joined"})
+            await robot_ws.send_str(msg)
+            log.info("Sent viewer-joined notification to robot for %s", robot_id)
 
-        The viewer queues these until it receives a live offer from the robot
-        (the retry loop sends one every ~2 s).  This ensures the viewer has
-        the robot's ICE candidates that were generated before it connected.
-        """
+    async def replay_ice_buffer(self, robot_id: str, viewer_ws: WebSocketResponse):
+        """Send buffered robot ICE candidates to a newly connected viewer."""
         buf = self._ice_buffer.get(robot_id)
         if not buf:
             return
@@ -71,22 +76,13 @@ class SignalingRelay:
             kind = parsed.get("kind")
             if kind == "ice":
                 self._ice_buffer[robot_id].append(message)
-
-        # #region agent log
-        import time as _t
-        _parsed = json.loads(message)
-        _is_sdp = _parsed.get("kind") in ("offer", "answer")
-        _debug_data = {"sessionId":"3d3ed7","location":"signaling.py:relay","message":"relay","data":{"robot_id":robot_id,"from":from_role,"to":to_role,"hasTarget":target is not None and not getattr(target,'closed',True),"kind":_parsed.get("kind"),"fullSdp":_parsed.get("sdp","") if _is_sdp else None},"timestamp":int(_t.time()*1000)}
-        try:
-            open("/home/robo/EW/EW_UGV_SK/.cursor/debug-3d3ed7.log","a").write(json.dumps(_debug_data)+"\n")
-        except Exception:
-            pass
-        # #endregion
+            elif kind == "offer":
+                self._ice_buffer.pop(robot_id, None)
 
         if target and not target.closed:
             await target.send_str(message)
         else:
-            log.debug("No %s peer for %s, buffered for later", to_role, robot_id)
+            log.debug("No %s peer for %s, message dropped", to_role, robot_id)
 
 
 async def handle_signaling_ws(request: web.Request) -> web.WebSocketResponse:
@@ -104,6 +100,7 @@ async def handle_signaling_ws(request: web.Request) -> web.WebSocketResponse:
 
     relay.register(robot_id, role, ws)
     if role == "viewer":
+        await relay.notify_robot_viewer_joined(robot_id)
         await relay.replay_ice_buffer(robot_id, ws)
     try:
         async for msg in ws:

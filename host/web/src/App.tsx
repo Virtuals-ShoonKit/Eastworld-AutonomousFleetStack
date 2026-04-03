@@ -18,7 +18,6 @@ export default function App() {
   const [pointCloudColor, setPointCloudColor] = useState("#9fd3ff");
   const [gridColor, setGridColor] = useState("#2a2a4e");
   const [isControlsOpen, setIsControlsOpen] = useState(false);
-  const [randomizeLiveCloud, setRandomizeLiveCloud] = useState(true);
   const [showOriginAxes, setShowOriginAxes] = useState(true);
   const [originAxesLength, setOriginAxesLength] = useState(1);
   const [originAxesThickness, setOriginAxesThickness] = useState(0.05);
@@ -60,7 +59,6 @@ export default function App() {
         backgroundColor={backgroundColor}
         pointCloudColor={pointCloudColor}
         gridColor={gridColor}
-        randomizeLiveCloud={randomizeLiveCloud}
         showOriginAxes={showOriginAxes}
         originAxesLength={originAxesLength}
         originAxesThickness={originAxesThickness}
@@ -117,8 +115,6 @@ export default function App() {
             setPointCloudColor={setPointCloudColor}
             gridColor={gridColor}
             setGridColor={setGridColor}
-            randomizeLiveCloud={randomizeLiveCloud}
-            setRandomizeLiveCloud={setRandomizeLiveCloud}
             showOriginAxes={showOriginAxes}
             setShowOriginAxes={setShowOriginAxes}
             originAxesLength={originAxesLength}
@@ -165,27 +161,22 @@ export default function App() {
   const panel3dIsFloat = panel3dDock === "float";
   const panelVideoIsFloat = panelVideoDock === "float";
 
-  let mainContent: React.ReactNode = null;
-  let secondaryContent: React.ReactNode = null;
   let splitOrientation: "horizontal" | "vertical" = "vertical";
   let hasSplit = false;
 
   if (!panel3dIsFloat && !panelVideoIsFloat) {
     if (panel3dDock === "main") {
-      mainContent = panel3dContent;
-      secondaryContent = panelVideoContent;
       splitOrientation = panelVideoDock === "right" ? "horizontal" : "vertical";
     } else if (panelVideoDock === "main") {
-      mainContent = panelVideoContent;
-      secondaryContent = panel3dContent;
       splitOrientation = panel3dDock === "right" ? "horizontal" : "vertical";
     } else {
-      mainContent = panel3dContent;
-      secondaryContent = panelVideoContent;
       splitOrientation = panelVideoDock === "right" ? "horizontal" : "vertical";
     }
     hasSplit = true;
-  } else if (panel3dIsFloat && !panelVideoIsFloat) {
+  }
+
+  let mainContent: React.ReactNode = null;
+  if (panel3dIsFloat && !panelVideoIsFloat) {
     mainContent = panelVideoContent;
   } else if (!panel3dIsFloat && panelVideoIsFloat) {
     mainContent = panel3dContent;
@@ -198,8 +189,8 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {hasSplit ? (
           <Group orientation={splitOrientation} style={{ flex: 1 }}>
-            <Panel id="main-panel" defaultSize="70%" minSize="40px" collapsible collapsedSize="28px">
-              {mainContent}
+            <Panel id="main-panel" defaultSize="65%" minSize="40px" collapsible collapsedSize="28px">
+              {panel3dContent}
             </Panel>
             <Separator
               style={{
@@ -210,8 +201,8 @@ export default function App() {
                   : { width: 4, cursor: "col-resize" }),
               }}
             />
-            <Panel id="secondary-panel" defaultSize="30%" minSize="40px" collapsible collapsedSize="28px">
-              {secondaryContent}
+            <Panel id="secondary-panel" defaultSize="35%" minSize="40px" collapsible collapsedSize="28px">
+              {panelVideoContent}
             </Panel>
           </Group>
         ) : mainContent ? (
@@ -236,8 +227,6 @@ function ControlsPanel({
   setPointCloudColor,
   gridColor,
   setGridColor,
-  randomizeLiveCloud,
-  setRandomizeLiveCloud,
   showOriginAxes,
   setShowOriginAxes,
   originAxesLength,
@@ -254,8 +243,6 @@ function ControlsPanel({
   setPointCloudColor: (v: string) => void;
   gridColor: string;
   setGridColor: (v: string) => void;
-  randomizeLiveCloud: boolean;
-  setRandomizeLiveCloud: (v: boolean) => void;
   showOriginAxes: boolean;
   setShowOriginAxes: (v: boolean) => void;
   originAxesLength: number;
@@ -304,16 +291,12 @@ function ControlsPanel({
         <input type="color" value={backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 78 }}>Point Cloud</span>
+        <span style={{ width: 78 }}>Map Cloud</span>
         <input type="color" value={pointCloudColor} onChange={(e) => setPointCloudColor(e.target.value)} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ width: 78 }}>Grid</span>
         <input type="color" value={gridColor} onChange={(e) => setGridColor(e.target.value)} />
-      </label>
-      <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 128 }}>Randomize Live Cloud</span>
-        <input type="checkbox" checked={randomizeLiveCloud} onChange={(e) => setRandomizeLiveCloud(e.target.checked)} />
       </label>
       <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ width: 128 }}>Show Origin Axes</span>

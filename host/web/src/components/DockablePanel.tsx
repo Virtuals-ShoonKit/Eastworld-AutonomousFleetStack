@@ -113,11 +113,41 @@ export function DockablePanel({
           onDockChange={onDockChange}
           onCollapsedChange={onCollapsedChange}
         />
-        {!collapsed && (
-          <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            flex: collapsed ? 0 : 1,
+            minHeight: 0,
+            minWidth: 0,
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
+          <div
+            style={
+              collapsed
+                ? {
+                    position: "absolute",
+                    left: -10000,
+                    top: 0,
+                    width: 4,
+                    height: 4,
+                    overflow: "hidden",
+                    opacity: 0,
+                    pointerEvents: "none",
+                  }
+                : {
+                    width: "100%",
+                    height: "100%",
+                    minHeight: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                  }
+            }
+          >
             {children}
           </div>
-        )}
+        </div>
       </div>
     );
   }
@@ -184,27 +214,44 @@ function FloatingWrapper({
 
   if (collapsed) {
     return (
-      <div
-        style={{
-          position: "fixed",
-          left: pos.x,
-          top: pos.y,
-          zIndex: 9999,
-          background: "rgba(9,12,18,0.95)",
-          border: "1px solid #00d4ff44",
-          borderRadius: 6,
-          padding: "4px 10px",
-          cursor: "pointer",
-          userSelect: "none",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-        onClick={() => onCollapsedChange(false)}
-      >
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#00d4ff" }}>{title}</span>
-        <span style={{ fontSize: 9, color: "#8899bb" }}>(click to expand)</span>
-      </div>
+      <>
+        <div
+          style={{
+            position: "fixed",
+            left: pos.x,
+            top: pos.y,
+            zIndex: 9999,
+            background: "rgba(9,12,18,0.95)",
+            border: "1px solid #00d4ff44",
+            borderRadius: 6,
+            padding: "4px 10px",
+            cursor: "pointer",
+            userSelect: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+          onClick={() => onCollapsedChange(false)}
+        >
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#00d4ff" }}>{title}</span>
+          <span style={{ fontSize: 9, color: "#8899bb" }}>(click to expand)</span>
+        </div>
+        <div
+          aria-hidden
+          style={{
+            position: "fixed",
+            left: -10000,
+            top: 0,
+            width: 4,
+            height: 4,
+            overflow: "hidden",
+            opacity: 0,
+            pointerEvents: "none",
+          }}
+        >
+          {children}
+        </div>
+      </>
     );
   }
 
