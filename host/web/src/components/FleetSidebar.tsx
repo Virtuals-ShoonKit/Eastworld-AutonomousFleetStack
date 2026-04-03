@@ -4,6 +4,36 @@ interface Props {
   robots: Map<string, RobotState>;
 }
 
+function BatteryIcon({ pct, voltage }: { pct: number | null; voltage: number | null }) {
+  const hasTelem = pct !== null;
+  const level = hasTelem ? pct! : 0;
+  const color = !hasTelem ? "#555" : level > 50 ? "#00ff88" : level > 20 ? "#ffcc00" : "#ff4444";
+  const fillW = hasTelem ? Math.max(1, (level / 100) * 16) : 0;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6 }}>
+      <svg width="22" height="12" viewBox="0 0 24 14">
+        <rect x="0.5" y="1" width="20" height="12" rx="2" ry="2"
+          fill="none" stroke={color} strokeWidth="1.2" />
+        <rect x="20.5" y="4" width="2.5" height="6" rx="1" fill={color} opacity={0.6} />
+        {hasTelem ? (
+          <rect x="2" y="2.5" width={fillW} height="9" rx="1" fill={color} opacity={0.8} />
+        ) : (
+          <text x="10.5" y="10.5" textAnchor="middle" fontSize="8" fill="#555" fontWeight="bold">?</text>
+        )}
+      </svg>
+      <span style={{ fontSize: 10, color, fontFamily: "monospace", fontWeight: 600 }}>
+        {hasTelem ? `${level}%` : "N/A"}
+      </span>
+      {voltage !== null && (
+        <span style={{ fontSize: 9, color: "#666", fontFamily: "monospace" }}>
+          {voltage.toFixed(1)}V
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function FleetSidebar({ robots }: Props) {
   const entries = Array.from(robots.values());
 
@@ -54,6 +84,8 @@ export function FleetSidebar({ robots }: Props) {
               x={robot.pose.p[0].toFixed(2)} y={robot.pose.p[1].toFixed(2)} z={robot.pose.p[2].toFixed(2)}
             </div>
           )}
+
+          <BatteryIcon pct={robot.battery_pct} voltage={robot.battery_voltage} />
         </div>
       ))}
     </div>

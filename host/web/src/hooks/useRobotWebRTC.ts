@@ -1,4 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+
+export interface NetworkStats {
+  rttMs: number | null;
+  bitrateKbps: number | null;
+  packetsReceived: number;
+  packetsLost: number;
+  framesDecoded: number;
+  jitterMs: number | null;
+}
+
+const EMPTY_STATS: NetworkStats = {
+  rttMs: null,
+  bitrateKbps: null,
+  packetsReceived: 0,
+  packetsLost: 0,
+  framesDecoded: 0,
+  jitterMs: null,
+};
 
 /**
  * Establishes a WebRTC connection to a single robot's video stream
@@ -7,11 +25,58 @@ import { useEffect, useRef, useState } from "react";
 export function useRobotWebRTC(robotId: string, signalingUrl: string) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [connected, setConnected] = useState(false);
-  // #region agent log
   const [debugInfo, setDebugInfo] = useState("init");
-  // #endregion
+  const [networkStats, setNetworkStats] = useState<NetworkStats>(EMPTY_STATS);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const prevBytesRef = useRef<{ bytes: number; ts: number } | null>(null);
+
+  const pollStats = useCallback(async () => {
+    const pc = pcRef.current;
+    if (!pc || pc.connectionState !== "connected") return;
+
+    try {
+      const stats = await pc.getStats();
+      let rttMs: number | null = null;
+      let packetsReceived = 0;
+      let packetsLost = 0;
+      let framesDecoded = 0;
+      let jitterMs: number | null = null;
+      let bytesReceived = 0;
+
+      stats.forEach((report: any) => {
+        if (report.type === "candidate-pair" && report.nominated) {
+          if (report.currentRoundTripTime != null) {
+            rttMs = Math.round(report.currentRoundTripTime * 1000);
+          }
+        }
+        if (report.type === "inbound-rtp" && report.kind === "video") {
+          packetsReceived = report.packetsReceived ?? 0;
+          packetsLost = report.packetsLost ?? 0;
+          framesDecoded = report.framesDecoded ?? 0;
+          bytesReceived = report.bytesReceived ?? 0;
+          if (report.jitter != null) {
+            jitterMs = Math.round(report.jitter * 1000);
+          }
+        }
+      });
+
+      let bitrateKbps: number | null = null;
+      const now = performance.now();
+      const prev = prevBytesRef.current;
+      if (prev && bytesReceived > prev.bytes) {
+        const dtSec = (now - prev.ts) / 1000;
+        if (dtSec > 0) {
+          bitrateKbps = Math.round(((bytesReceived - prev.bytes) * 8) / dtSec / 1000);
+        }
+      }
+      prevBytesRef.current = { bytes: bytesReceived, ts: now };
+
+      setNetworkStats({ rttMs, bitrateKbps, packetsReceived, packetsLost, framesDecoded, jitterMs });
+    } catch {
+      // stats unavailable
+    }
+  }, []);
 
   useEffect(() => {
     if (!robotId) return;
@@ -26,51 +91,16 @@ export function useRobotWebRTC(robotId: string, signalingUrl: string) {
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
     pcRef.current = pc;
+    prevBytesRef.current = null;
 
     pc.addTransceiver("video", { direction: "recvonly" });
 
     pc.ontrack = (ev) => {
-      // #region agent log
-      setDebugInfo(prev => prev + ` | track:streams=${ev.streams.length},kind=${ev.track.kind},state=${ev.track.readyState}`);
-      // #endregion
+      setDebugInfo(prev => prev + ` | track:${ev.track.kind}`);
       if (videoRef.current && ev.streams[0]) {
         videoRef.current.srcObject = ev.streams[0];
-        videoRef.current.play().then(() => {
-          // #region agent log
-          setDebugInfo(prev => prev + " | play:OK");
-          // #endregion
-        }).catch((err) => {
-          // #region agent log
-          setDebugInfo(prev => prev + ` | play:FAIL(${err?.name})`);
-          // #endregion
-        });
+        videoRef.current.play().catch(() => {});
         setConnected(true);
-        // #region agent log
-        const vid = videoRef.current;
-        const checkVideo = async () => {
-          const stats = await pc.getStats();
-          const types: string[] = [];
-          let rtpInfo = "";
-          let transportInfo = "";
-          let pairInfo = "";
-          stats.forEach((report: any) => {
-            if (!types.includes(report.type)) types.push(report.type);
-            if (report.type === "inbound-rtp") {
-              rtpInfo = `rtp:k=${report.kind},pkts=${report.packetsReceived},bytes=${report.bytesReceived},dec=${report.framesDecoded}`;
-            }
-            if (report.type === "transport") {
-              transportInfo = `tr:state=${report.dtlsState},ice=${report.iceLocalCandidateId},bytesRx=${report.bytesReceived},bytesTx=${report.bytesSent}`;
-            }
-            if (report.type === "candidate-pair" && report.nominated) {
-              pairInfo = `pair:state=${report.state},bytesRx=${report.bytesReceived},bytesTx=${report.bytesSent},rtt=${report.currentRoundTripTime}`;
-            }
-          });
-          const info = `types=[${types.join(",")}] ${rtpInfo} ${transportInfo} ${pairInfo}`;
-          setDebugInfo(info);
-        };
-        setTimeout(checkVideo, 4000);
-        setTimeout(checkVideo, 10000);
-        // #endregion
       }
     };
 
@@ -86,58 +116,22 @@ export function useRobotWebRTC(robotId: string, signalingUrl: string) {
       }
     };
 
-    // #region agent log
     pc.onconnectionstatechange = () => {
       setDebugInfo(prev => prev + ` | conn:${pc.connectionState}`);
-      if (pc.connectionState === "connected") {
-        const checkStats = async () => {
-          const stats = await pc.getStats();
-          const types: string[] = [];
-          let rtpInfo = "";
-          let transportInfo = "";
-          stats.forEach((report: any) => {
-            if (!types.includes(report.type)) types.push(report.type);
-            if (report.type === "inbound-rtp") {
-              rtpInfo = `rtp:k=${report.kind},pkts=${report.packetsReceived},bytes=${report.bytesReceived},dec=${report.framesDecoded}`;
-            }
-            if (report.type === "transport") {
-              transportInfo = `tr:dtls=${report.dtlsState},bytesRx=${report.bytesReceived},bytesTx=${report.bytesSent}`;
-            }
-          });
-          setDebugInfo(`CONNECTED types=[${types.join(",")}] ${rtpInfo} ${transportInfo}`);
-          fetch('http://127.0.0.1:7868/ingest/7bfa4f77-b30e-4ffb-9251-65501936595f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3d3ed7'},body:JSON.stringify({sessionId:'3d3ed7',runId:'post-fix-1',hypothesisId:'H1',location:'useRobotWebRTC.ts:stats',message:'post-connected stats',data:{types,rtpInfo,transportInfo,hasInboundRtp:types.includes('inbound-rtp')},timestamp:Date.now()})}).catch(()=>{});
-        };
-        setTimeout(checkStats, 2000);
-        setTimeout(checkStats, 6000);
-      }
     };
-    // #endregion
 
     pc.oniceconnectionstatechange = () => {
-      // #region agent log
       setDebugInfo(prev => prev + ` | ice:${pc.iceConnectionState}`);
-      // #endregion
       setConnected(
         pc.iceConnectionState === "connected" ||
           pc.iceConnectionState === "completed"
       );
     };
 
-    // #region agent log
-    let offerCount = 0;
-    // #endregion
     ws.onmessage = async (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        // #region agent log
-        if (msg.kind === "offer" || msg.kind === "answer") setDebugInfo(prev => prev + ` | ws:${msg.kind}`);
-        // #endregion
         if (msg.kind === "offer") {
-          // #region agent log
-          offerCount++;
-          const hasFmtp = (msg.sdp || '').includes('a=fmtp:96');
-          fetch('http://127.0.0.1:7868/ingest/7bfa4f77-b30e-4ffb-9251-65501936595f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3d3ed7'},body:JSON.stringify({sessionId:'3d3ed7',runId:'post-fix-1',hypothesisId:'H1',location:'useRobotWebRTC.ts:offer-rx',message:'offer received by viewer',data:{offerCount,hasFmtp,sigState:pc.signalingState,sdpPreview:(msg.sdp||'').substring(0,300)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
           remoteDescriptionSet = true;
           while (pendingRemoteIce.length > 0) {
@@ -148,10 +142,6 @@ export function useRobotWebRTC(robotId: string, signalingUrl: string) {
           }
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          // #region agent log
-          const ansHasFmtp = (answer.sdp || '').includes('a=fmtp:96');
-          fetch('http://127.0.0.1:7868/ingest/7bfa4f77-b30e-4ffb-9251-65501936595f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3d3ed7'},body:JSON.stringify({sessionId:'3d3ed7',runId:'post-fix-1',hypothesisId:'H1',location:'useRobotWebRTC.ts:answer-tx',message:'answer created by viewer',data:{offerCount,ansHasFmtp,sigState:pc.signalingState,sdpPreview:(answer.sdp||'').substring(0,300)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           ws.send(JSON.stringify({ kind: "answer", sdp: answer.sdp }));
         } else if (msg.kind === "ice") {
           const candidate = {
@@ -173,8 +163,18 @@ export function useRobotWebRTC(robotId: string, signalingUrl: string) {
       pc.close();
       ws.close();
       setConnected(false);
+      setNetworkStats(EMPTY_STATS);
+      prevBytesRef.current = null;
     };
   }, [robotId, signalingUrl]);
 
-  return { videoRef, connected, debugInfo };
+  // Periodic stats poller (every 2s while connected)
+  useEffect(() => {
+    if (!connected) return;
+    pollStats();
+    const id = setInterval(pollStats, 2000);
+    return () => clearInterval(id);
+  }, [connected, pollStats]);
+
+  return { videoRef, connected, debugInfo, networkStats };
 }

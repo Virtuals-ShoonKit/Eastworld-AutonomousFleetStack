@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import { parseMessage, MsgType, PoseData, CloudData, FleetState } from "../lib/protocol";
+import { parseMessage, MsgType, PoseData, CloudData, FleetState, TelemetryData } from "../lib/protocol";
 
 const STALE_ROBOT_TIMEOUT_MS = 15_000;
 const STALE_SWEEP_INTERVAL_MS = 2_000;
@@ -11,6 +11,8 @@ export interface RobotState {
   hardware: string;
   pose: PoseData | null;
   lastUpdateMs: number;
+  battery_voltage: number | null;
+  battery_pct: number | null;
 }
 
 export function useFleetSocket(url: string) {
@@ -54,6 +56,8 @@ export function useFleetSocket(url: string) {
               hardware: existing?.hardware ?? "orin_nx",
               pose,
               lastUpdateMs: now,
+              battery_voltage: existing?.battery_voltage ?? null,
+              battery_pct: existing?.battery_pct ?? null,
             });
             return next;
           });
@@ -71,21 +75,38 @@ export function useFleetSocket(url: string) {
               hardware: existing?.hardware ?? "orin_nx",
               pose: existing?.pose ?? null,
               lastUpdateMs: now,
+              battery_voltage: existing?.battery_voltage ?? null,
+              battery_pct: existing?.battery_pct ?? null,
             });
             return next;
           });
           cloudCallbacks.current.forEach((cb) => cb(cloud));
+        } else if (type === MsgType.TELEMETRY) {
+          const telem = payload as TelemetryData;
+          setRobots((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(telem.r);
+            if (existing) {
+              next.set(telem.r, {
+                ...existing,
+                battery_voltage: telem.v,
+                battery_pct: telem.p,
+              });
+            }
+            return next;
+          });
         } else if (type === MsgType.FLEET_STATE) {
           const state = (payload as { robots: FleetState["robots"] });
           const now = Date.now();
           setRobots((prev) => {
             const next = new Map<string, RobotState>();
             for (const r of state.robots) {
-              // Remove disconnected robots from the viewer list.
               if (!r.connected) continue;
               const existing = prev.get(r.robot_id);
               next.set(r.robot_id, {
                 ...r,
+                battery_voltage: r.battery_voltage ?? existing?.battery_voltage ?? null,
+                battery_pct: r.battery_pct ?? existing?.battery_pct ?? null,
                 pose: existing?.pose ?? null,
                 lastUpdateMs: existing?.lastUpdateMs ?? now,
               });

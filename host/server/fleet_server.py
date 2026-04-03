@@ -60,6 +60,11 @@ async def handle_robot_ws(request: web.Request) -> web.WebSocketResponse:
                 tag = data[0]
                 if tag == 0x10:  # POSE
                     session.last_pose_bytes = data
+                elif tag == 0x12:  # TELEMETRY
+                    import msgpack as _mp
+                    _d = _mp.unpackb(data[1:], raw=False)
+                    session.battery_voltage = _d.get("v")
+                    session.battery_pct = _d.get("p")
                 await relay.broadcast(data)
 
             elif msg.type == web.WSMsgType.TEXT:

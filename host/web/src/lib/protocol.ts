@@ -10,6 +10,7 @@ export const MsgType = {
   HEARTBEAT: 0x02,
   POSE: 0x10,
   CLOUD: 0x11,
+  TELEMETRY: 0x12,
   SIGNALING: 0x20,
   FLEET_STATE: 0x30,
 } as const;
@@ -28,6 +29,12 @@ export interface CloudData {
   d: Uint8Array; // draco bytes
 }
 
+export interface TelemetryData {
+  r: string; // robot_id
+  v: number; // battery_voltage
+  p: number; // battery_pct (0-100)
+}
+
 export interface FleetState {
   robots: Array<{
     robot_id: string;
@@ -35,6 +42,8 @@ export interface FleetState {
     last_heartbeat: number;
     hardware: string;
     alive: boolean;
+    battery_voltage: number | null;
+    battery_pct: number | null;
   }>;
 }
 

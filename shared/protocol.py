@@ -27,6 +27,7 @@ class MsgType(IntEnum):
     HEARTBEAT = 0x02
     POSE = 0x10
     CLOUD = 0x11
+    TELEMETRY = 0x12
     SIGNALING = 0x20
     FLEET_STATE = 0x30
 
@@ -129,6 +130,31 @@ class CloudMsg:
         )
 
 
+@dataclass
+class TelemetryMsg:
+    """Battery / system telemetry from edge robot."""
+    robot_id: str
+    battery_voltage: float
+    battery_pct: int  # 0-100, derived from voltage
+
+    def pack(self) -> bytes:
+        payload = msgpack.packb({
+            "r": self.robot_id,
+            "v": self.battery_voltage,
+            "p": self.battery_pct,
+        })
+        return struct.pack("B", MsgType.TELEMETRY) + payload
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "TelemetryMsg":
+        d = msgpack.unpackb(data[1:], raw=False)
+        return cls(
+            robot_id=d["r"],
+            battery_voltage=d["v"],
+            battery_pct=d["p"],
+        )
+
+
 # ---------------------------------------------------------------------------
 # WebRTC signaling (relayed through host)
 # ---------------------------------------------------------------------------
@@ -189,6 +215,7 @@ _UNPACKERS = {
     MsgType.HEARTBEAT: HeartbeatMsg.unpack,
     MsgType.POSE: PoseMsg.unpack,
     MsgType.CLOUD: CloudMsg.unpack,
+    MsgType.TELEMETRY: TelemetryMsg.unpack,
     MsgType.SIGNALING: SignalingMsg.unpack,
     MsgType.FLEET_STATE: FleetStateMsg.unpack,
 }

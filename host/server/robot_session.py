@@ -16,6 +16,10 @@ class RobotSession:
     # Latest cached pose for new viewer connections
     last_pose_bytes: bytes | None = None
 
+    # Battery telemetry (updated via TELEMETRY messages)
+    battery_voltage: float | None = None
+    battery_pct: int | None = None
+
     def touch(self):
         self.last_heartbeat = time.time()
 
@@ -29,4 +33,6 @@ class RobotSession:
             "last_heartbeat": self.last_heartbeat,
             "hardware": self.hardware,
             "alive": self.is_alive(),
+            "battery_voltage": self.battery_voltage,
+            "battery_pct": self.battery_pct,
         }
