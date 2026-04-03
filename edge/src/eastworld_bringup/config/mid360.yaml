@@ -68,7 +68,7 @@
       # odom->base_link TF is broadcast at the same rate.
       imu_rate_odom: true
       gravity_align_en: true
-      sensor_pitch_deg: 2.5  # measured: IMU reads -2.5° on flat ground → compensate with +2.5
+      sensor_pitch_deg: -2.3  # measured: IMU reads -2.5° on flat ground → compensate with +2.5
       publish_map_odom_tf: false  # map->odom identity is now a static TF in the launch file
 
     publish:

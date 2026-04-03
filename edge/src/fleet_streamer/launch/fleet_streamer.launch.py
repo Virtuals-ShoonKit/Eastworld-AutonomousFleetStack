@@ -86,6 +86,8 @@ def generate_launch_description():
             "rate_hz": float(cloud_cfg["rate_hz"]),
             "draco_quantization_bits": int(cloud_cfg["draco_quantization_bits"]),
             "use_zstd": bool(cloud_cfg["use_zstd"]),
+            "cloud_frame": str(cloud_cfg.get("cloud_frame", "odom")),
+            "map_frame": str(cloud_cfg.get("map_frame", "map")),
         }],
     )
 

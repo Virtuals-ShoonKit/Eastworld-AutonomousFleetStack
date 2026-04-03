@@ -1,11 +1,16 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
+import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { PoseData } from "../lib/protocol";
 
 const ROBOT_COLORS = [
   "#00d4ff", "#ff6b35", "#7eff3f", "#ff3fdc", "#ffd53f",
 ];
+
+// base_link sits this far above ground (wheel_radius + |wheel_vertical_offset|)
+// from scout_mini.urdf.xacro: 0.0875 + 0.0905 = 0.178
+const BASE_LINK_HEIGHT = 0.178;
 
 interface Props {
   robotId: string;
@@ -33,43 +38,93 @@ export function RobotMarker({ robotId, index, pose }: Props) {
 
   return (
     <group ref={groupRef}>
-      {/* Chassis */}
-      <mesh position={[0, 0, 0.16]}>
-        <boxGeometry args={[0.68, 0.46, 0.16]} />
-        <meshStandardMaterial color={color} transparent opacity={0.9} metalness={0.1} roughness={0.7} />
-      </mesh>
+      {/* Floating label (positioned relative to base_link) */}
+      <Html
+        position={[0, 0, 0.5]}
+        center
+        distanceFactor={15}
+        style={{ pointerEvents: "none", userSelect: "none" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "3px 9px 3px 7px",
+            borderRadius: 5,
+            background: "rgba(5, 8, 14, 0.82)",
+            border: `1px solid ${color}55`,
+            boxShadow: `0 0 8px ${color}22, 0 2px 8px rgba(0,0,0,0.5)`,
+            whiteSpace: "nowrap",
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#e8edf5",
+            letterSpacing: 0.3,
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <span
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: color,
+              boxShadow: `0 0 6px ${color}`,
+              flexShrink: 0,
+              animation: "pulse-dot 2s ease-in-out infinite",
+            }}
+          />
+          {robotId}
+        </div>
+        <style>{`
+          @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+          }
+        `}</style>
+      </Html>
 
-      {/* Top deck */}
-      <mesh position={[0, 0, 0.26]}>
-        <boxGeometry args={[0.42, 0.28, 0.04]} />
-        <meshStandardMaterial color="#2a2f38" metalness={0.25} roughness={0.55} />
-      </mesh>
+      {/* Shift ground-relative model down so base_link is the origin */}
+      <group position={[0, 0, -BASE_LINK_HEIGHT]}>
+        {/* Chassis */}
+        <mesh position={[0, 0, 0.16]}>
+          <boxGeometry args={[0.68, 0.46, 0.16]} />
+          <meshStandardMaterial color={color} transparent opacity={0.9} metalness={0.1} roughness={0.7} />
+        </mesh>
 
-      {/* Sensor mast mock */}
-      <mesh position={[0.08, 0, 0.34]}>
-        <cylinderGeometry args={[0.02, 0.02, 0.16, 12]} />
-        <meshStandardMaterial color="#8aa0b5" metalness={0.4} roughness={0.4} />
-      </mesh>
+        {/* Top deck */}
+        <mesh position={[0, 0, 0.26]}>
+          <boxGeometry args={[0.42, 0.28, 0.04]} />
+          <meshStandardMaterial color="#2a2f38" metalness={0.25} roughness={0.55} />
+        </mesh>
 
-      {/* Wheels */}
-      {wheelOffsets.map(([x, y, z], i) => (
-        <group key={`${robotId}-wheel-${i}`} position={[x, y, z]}>
-          <mesh>
-            <cylinderGeometry args={[0.1, 0.1, 0.08, 18]} />
-            <meshStandardMaterial color="#22262c" roughness={0.95} metalness={0.02} />
-          </mesh>
-          <mesh>
-            <cylinderGeometry args={[0.045, 0.045, 0.082, 14]} />
-            <meshStandardMaterial color="#505a66" roughness={0.45} metalness={0.4} />
-          </mesh>
-        </group>
-      ))}
+        {/* Sensor mast mock */}
+        <mesh position={[0.08, 0, 0.34]}>
+          <cylinderGeometry args={[0.02, 0.02, 0.16, 12]} />
+          <meshStandardMaterial color="#8aa0b5" metalness={0.4} roughness={0.4} />
+        </mesh>
 
-      {/* Heading arrow */}
-      <mesh position={[0.42, 0, 0.22]} rotation={[0, 0, -Math.PI / 2]}>
-        <coneGeometry args={[0.06, 0.16, 10]} />
-        <meshStandardMaterial color="#f4f7ff" emissive="#6076ff" emissiveIntensity={0.35} />
-      </mesh>
+        {/* Wheels */}
+        {wheelOffsets.map(([x, y, z], i) => (
+          <group key={`${robotId}-wheel-${i}`} position={[x, y, z]}>
+            <mesh>
+              <cylinderGeometry args={[0.1, 0.1, 0.08, 18]} />
+              <meshStandardMaterial color="#22262c" roughness={0.95} metalness={0.02} />
+            </mesh>
+            <mesh>
+              <cylinderGeometry args={[0.045, 0.045, 0.082, 14]} />
+              <meshStandardMaterial color="#505a66" roughness={0.45} metalness={0.4} />
+            </mesh>
+          </group>
+        ))}
+
+        {/* Heading arrow */}
+        <mesh position={[0.42, 0, 0.22]} rotation={[0, 0, -Math.PI / 2]}>
+          <coneGeometry args={[0.06, 0.16, 10]} />
+          <meshStandardMaterial color="#f4f7ff" emissive="#6076ff" emissiveIntensity={0.35} />
+        </mesh>
+      </group>
     </group>
   );
 }

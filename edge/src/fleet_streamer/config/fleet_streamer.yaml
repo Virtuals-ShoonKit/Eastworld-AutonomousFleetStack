@@ -32,3 +32,5 @@ fleet_streamer:
     rate_hz: 10                  # throttle to N Hz
     draco_quantization_bits: 11
     use_zstd: false
+    cloud_frame: "odom"          # frame the cloud is actually in (LIVO labels it "map")
+    map_frame: "map"             # global map frame (from pcd_relocalizer TF)
