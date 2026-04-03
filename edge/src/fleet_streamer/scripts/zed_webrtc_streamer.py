@@ -368,12 +368,11 @@ class ZedWebRTCStreamer:
                 msg["candidate"],
             )
         elif kind == "viewer-joined":
-            log.info("New viewer connected, resending offer")
+            log.info("Viewer joined — restarting pipeline for clean WebRTC session")
             self._answer_received = False
-            if self._last_offer_sdp:
-                await self._send_signaling({"kind": "offer", "sdp": self._last_offer_sdp})
-            else:
-                self._request_offer("viewer-joined")
+            self._last_offer_sdp = None
+            self.stop_pipeline()
+            self.start_pipeline()
         else:
             log.warning("Unknown signaling message kind: %s", kind)
 
