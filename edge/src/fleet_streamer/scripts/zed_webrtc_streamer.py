@@ -2,7 +2,7 @@
 """
 Standalone ZED -> WebRTC streamer for Jetson Orin NX.
 
-Pipeline:  zedsrc -> videoconvert -> nvvideoconvert -> nvv4l2h264enc -> rtph264pay -> webrtcbin
+Pipeline:  zedsrc -> nvvideoconvert -> nvv4l2h264enc -> rtph264pay -> webrtcbin
 Signaling: WebSocket to host fleet server
 
 No ROS dependency -- runs as a plain process alongside the ROS stack.
@@ -16,10 +16,12 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 import gi
@@ -74,6 +76,7 @@ def _ws_is_open(ws) -> bool:
 
 _MAX_RESTART_DELAY = 30.0
 _INITIAL_RESTART_DELAY = 2.0
+_CUDA_FATAL_COOLDOWN = 10.0
 
 
 class ZedWebRTCStreamer:
@@ -92,6 +95,7 @@ class ZedWebRTCStreamer:
         self._last_offer_sdp: str | None = None
         self._pipeline_error: asyncio.Event | None = None
         self._cuda_fatal = False
+        self._pipeline_start_time: float | None = None
 
     # -- pipeline -----------------------------------------------------------
 
@@ -130,7 +134,6 @@ class ZedWebRTCStreamer:
         desc = (
             f"zedsrc stream-type={stream_type} camera-resolution={resolution} camera-fps={fps} "
             f"! queue max-size-buffers={queue_max_buffers + 1} max-size-bytes=0 max-size-time=0 "
-            "! videoconvert "
             "! nvvideoconvert "
             "! video/x-raw(memory:NVMM),format=NV12 "
             f"! queue leaky={queue_leaky} max-size-buffers={queue_max_buffers} max-size-bytes=0 max-size-time=0 "
@@ -232,6 +235,7 @@ class ZedWebRTCStreamer:
         bus.add_signal_watch()
         bus.connect("message", self._on_bus_message)
 
+        self._pipeline_start_time = time.monotonic()
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             msg = bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.WARNING)
@@ -351,11 +355,18 @@ class ZedWebRTCStreamer:
                 self.ws = None
                 self._pipeline_error = None
             if self._cuda_fatal:
+                uptime = ""
+                if self._pipeline_start_time is not None:
+                    uptime = f" (pipeline lived {time.monotonic() - self._pipeline_start_time:.1f}s)"
                 log.error(
-                    "Fatal CUDA error detected — CUDA context is irrecoverably "
-                    "corrupted.  Exiting so the launcher can respawn a fresh process."
+                    "Fatal CUDA error detected%s — CUDA context is irrecoverably "
+                    "corrupted.  Cooling down %.0fs then exiting so the launcher "
+                    "can respawn a fresh process.",
+                    uptime,
+                    _CUDA_FATAL_COOLDOWN,
                 )
-                sys.exit(1)
+                time.sleep(_CUDA_FATAL_COOLDOWN)
+                os._exit(1)
             log.info("Waiting %.1fs before restart …", restart_delay)
             await asyncio.sleep(restart_delay)
             restart_delay = min(restart_delay * 1.5, _MAX_RESTART_DELAY)
