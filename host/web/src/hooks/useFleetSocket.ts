@@ -3,6 +3,9 @@ import { parseMessage, MsgType, PoseData, CloudData, FleetState, TelemetryData }
 
 const STALE_ROBOT_TIMEOUT_MS = 15_000;
 const STALE_SWEEP_INTERVAL_MS = 2_000;
+const POSE_STATE_THROTTLE_MS = 200;
+
+export type PoseMapRef = React.MutableRefObject<Map<string, PoseData>>;
 
 export interface RobotState {
   robot_id: string;
@@ -24,6 +27,14 @@ export function useFleetSocket(url: string) {
   const [robots, setRobots] = useState<Map<string, RobotState>>(new Map());
   const poseCallbacks = useRef<Set<(pose: PoseData) => void>>(new Set());
   const cloudCallbacks = useRef<Set<(cloud: CloudData) => void>>(new Set());
+
+  // Real-time pose data readable from useFrame (no re-renders)
+  const poseMapRef = useRef<Map<string, PoseData>>(new Map());
+  // Timestamps for stale detection — outside React state
+  const cloudTsRef = useRef<Map<string, number>>(new Map());
+  const poseTsRef = useRef<Map<string, number>>(new Map());
+  // Tracks when we last flushed a POSE into React state (per robot)
+  const poseStateTsRef = useRef<Map<string, number>>(new Map());
 
   const onPose = useCallback((cb: (p: PoseData) => void) => {
     poseCallbacks.current.add(cb);
@@ -50,48 +61,40 @@ export function useFleetSocket(url: string) {
         if (type === MsgType.POSE) {
           const pose = payload as PoseData;
           const now = Date.now();
-          setRobots((prev) => {
-            const next = new Map(prev);
-            const existing = next.get(pose.r);
-            next.set(pose.r, {
-              robot_id: pose.r,
-              connected: existing?.connected ?? true,
-              alive: true,
-              hardware: existing?.hardware ?? "orin_nx",
-              pose,
-              lastUpdateMs: now,
-              battery_voltage: existing?.battery_voltage ?? null,
-              battery_pct: existing?.battery_pct ?? null,
-              cpu_pct: existing?.cpu_pct ?? null,
-              gpu_pct: existing?.gpu_pct ?? null,
-              mem_used_mb: existing?.mem_used_mb ?? null,
-              mem_total_mb: existing?.mem_total_mb ?? null,
-            });
-            return next;
-          });
+
+          // Always write to ref — Three.js reads this every frame
+          poseMapRef.current.set(pose.r, pose);
+          poseTsRef.current.set(pose.r, now);
           poseCallbacks.current.forEach((cb) => cb(pose));
+
+          // Throttle React state updates: only flush when the robot is new
+          // or enough time has elapsed (keeps sidebar text fresh at ~5 Hz).
+          const lastFlush = poseStateTsRef.current.get(pose.r);
+          if (lastFlush === undefined || now - lastFlush >= POSE_STATE_THROTTLE_MS) {
+            poseStateTsRef.current.set(pose.r, now);
+            setRobots((prev) => {
+              const next = new Map(prev);
+              const existing = next.get(pose.r);
+              next.set(pose.r, {
+                robot_id: pose.r,
+                connected: existing?.connected ?? true,
+                alive: true,
+                hardware: existing?.hardware ?? "orin_nx",
+                pose,
+                lastUpdateMs: now,
+                battery_voltage: existing?.battery_voltage ?? null,
+                battery_pct: existing?.battery_pct ?? null,
+                cpu_pct: existing?.cpu_pct ?? null,
+                gpu_pct: existing?.gpu_pct ?? null,
+                mem_used_mb: existing?.mem_used_mb ?? null,
+                mem_total_mb: existing?.mem_total_mb ?? null,
+              });
+              return next;
+            });
+          }
         } else if (type === MsgType.CLOUD) {
           const cloud = payload as CloudData;
-          const now = Date.now();
-          setRobots((prev) => {
-            const next = new Map(prev);
-            const existing = next.get(cloud.r);
-            next.set(cloud.r, {
-              robot_id: cloud.r,
-              connected: existing?.connected ?? true,
-              alive: true,
-              hardware: existing?.hardware ?? "orin_nx",
-              pose: existing?.pose ?? null,
-              lastUpdateMs: now,
-              battery_voltage: existing?.battery_voltage ?? null,
-              battery_pct: existing?.battery_pct ?? null,
-              cpu_pct: existing?.cpu_pct ?? null,
-              gpu_pct: existing?.gpu_pct ?? null,
-              mem_used_mb: existing?.mem_used_mb ?? null,
-              mem_total_mb: existing?.mem_total_mb ?? null,
-            });
-            return next;
-          });
+          cloudTsRef.current.set(cloud.r, Date.now());
           cloudCallbacks.current.forEach((cb) => cb(cloud));
         } else if (type === MsgType.TELEMETRY) {
           const telem = payload as TelemetryData;
@@ -138,6 +141,10 @@ export function useFleetSocket(url: string) {
 
       ws.onclose = () => {
         setRobots(new Map());
+        poseMapRef.current.clear();
+        poseTsRef.current.clear();
+        cloudTsRef.current.clear();
+        poseStateTsRef.current.clear();
         reconnectTimer = setTimeout(connect, 2000);
       };
     }
@@ -156,10 +163,10 @@ export function useFleetSocket(url: string) {
         if (prev.size === 0) return prev;
         const next = new Map<string, RobotState>();
         for (const [id, robot] of prev.entries()) {
-          // Keep robots that are marked connected from fleet_state even if
-          // pose/cloud updates are currently sparse, otherwise video panels
-          // unmount and close WebRTC signaling sessions.
-          if (robot.connected || robot.lastUpdateMs >= cutoff) {
+          const cloudTs = cloudTsRef.current.get(id) ?? 0;
+          const poseTs = poseTsRef.current.get(id) ?? 0;
+          const lastActivity = Math.max(robot.lastUpdateMs, cloudTs, poseTs);
+          if (robot.connected || lastActivity >= cutoff) {
             next.set(id, robot);
           }
         }
@@ -170,5 +177,5 @@ export function useFleetSocket(url: string) {
     return () => clearInterval(timer);
   }, []);
 
-  return { robots, onPose, onCloud };
+  return { robots, onPose, onCloud, poseMapRef };
 }

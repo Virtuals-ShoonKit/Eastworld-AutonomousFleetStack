@@ -1,12 +1,13 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
-import { RobotMarker } from "./RobotMarker";
+import { RobotFleet } from "./RobotMarker";
 import { PointCloudLayer } from "./PointCloudLayer";
-import type { RobotState } from "../hooks/useFleetSocket";
+import type { RobotState, PoseMapRef } from "../hooks/useFleetSocket";
 import type { CloudData } from "../lib/protocol";
 
 interface Props {
   robots: Map<string, RobotState>;
+  poseMapRef: PoseMapRef;
   mapUrl?: string;
   onCloudRegister: (cb: (cloud: CloudData) => void) => () => void;
   backgroundColor: string;
@@ -65,6 +66,7 @@ function OriginAxesMarker({ length, thickness }: OriginAxesMarkerProps) {
 
 export function FleetViewer3D({
   robots,
+  poseMapRef,
   mapUrl,
   onCloudRegister,
   backgroundColor,
@@ -75,8 +77,6 @@ export function FleetViewer3D({
   originAxesThickness,
   mapZOffset,
 }: Props) {
-  const robotEntries = Array.from(robots.entries());
-
   return (
     <Canvas
       camera={{ position: [-10, 5, 40], fov: 60, near: 0.1, far: 1000, up: [0, 0, 1] }}
@@ -106,13 +106,12 @@ export function FleetViewer3D({
         mapUrl={mapUrl}
         onCloudRegister={onCloudRegister}
         robots={robots}
+        poseMapRef={poseMapRef}
         pointCloudColor={pointCloudColor}
         mapZOffset={mapZOffset}
       />
 
-      {robotEntries.map(([id, state], idx) => (
-        <RobotMarker key={id} robotId={id} index={idx} pose={state.pose} />
-      ))}
+      <RobotFleet robots={robots} poseMapRef={poseMapRef} />
 
       <OrbitControls
         makeDefault

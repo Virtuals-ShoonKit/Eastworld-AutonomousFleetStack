@@ -11,7 +11,7 @@ const SIGNALING_URL = `ws://${window.location.hostname}:8800`;
 const MAP_URL = "./maps/office_map.drc";
 
 export default function App() {
-  const { robots, onCloud } = useFleetSocket(WS_URL);
+  const { robots, onCloud, poseMapRef } = useFleetSocket(WS_URL);
   const robotIds = useMemo(() => Array.from(robots.keys()), [robots]);
 
   const [backgroundColor, setBackgroundColor] = useState("#070707");
@@ -54,6 +54,7 @@ export default function App() {
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <FleetViewer3D
         robots={robots}
+        poseMapRef={poseMapRef}
         mapUrl={MAP_URL}
         onCloudRegister={onCloud}
         backgroundColor={backgroundColor}
