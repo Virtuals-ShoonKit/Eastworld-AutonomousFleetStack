@@ -980,6 +980,11 @@ void LIVMapper::PointCloud2Cbk(const sensor_msgs::msg::PointCloud2::ConstSharedP
   lid_header_time_buffer_.push_back(toSec(msg->header.stamp));
   last_timestamp_lidar_ = toSec(msg->header.stamp);
 
+  while (lid_raw_data_buffer_.size() > MAX_LIDAR_BUFFER_SIZE_) {
+    lid_raw_data_buffer_.pop_front();
+    lid_header_time_buffer_.pop_front();
+  }
+
   mtx_buffer_.unlock();
   sig_buffer_.notify_all();
 }
@@ -1019,6 +1024,11 @@ void LIVMapper::LivoxCbk(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr
   lid_raw_data_buffer_.push_back(ptr);
   lid_header_time_buffer_.push_back(cur_head_time);
   last_timestamp_lidar_ = cur_head_time;
+
+  while (lid_raw_data_buffer_.size() > MAX_LIDAR_BUFFER_SIZE_) {
+    lid_raw_data_buffer_.pop_front();
+    lid_header_time_buffer_.pop_front();
+  }
 
   mtx_buffer_.unlock();
   sig_buffer_.notify_all();
