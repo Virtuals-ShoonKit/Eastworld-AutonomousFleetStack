@@ -278,31 +278,31 @@ void LIVMapper::InitializeFiles()
 
 void LIVMapper::InitializeSubscribersAndPublishers()
 {
-  // Create QoS profile
   auto qos_small = rclcpp::QoS(rclcpp::KeepLast(10));
   auto qos = rclcpp::QoS(rclcpp::KeepLast(100));
-  auto qos_large = rclcpp::QoS(rclcpp::KeepLast(200000));
+  auto qos_lidar = rclcpp::QoS(rclcpp::KeepLast(20));
+  auto qos_imu = rclcpp::QoS(rclcpp::KeepLast(400));
 
   // Subscribers
   if (p_pre_->lidar_type_ == AVIA)
   {
     sub_pcl_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-        lid_topic_, qos_large,
+        lid_topic_, qos_lidar,
         std::bind(&LIVMapper::LivoxCbk, this, std::placeholders::_1));
   }
   else
   {
     sub_pcl_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-        lid_topic_, qos_large,
+        lid_topic_, qos_lidar,
         std::bind(&LIVMapper::PointCloud2Cbk, this, std::placeholders::_1));
   }
 
   sub_imu_ = node_->create_subscription<sensor_msgs::msg::Imu>(
-      imu_topic_, qos_large,
+      imu_topic_, qos_imu,
       std::bind(&LIVMapper::ImuCbk, this, std::placeholders::_1));
 
   sub_img_ = node_->create_subscription<sensor_msgs::msg::Image>(
-      img_topic_, qos_large,
+      img_topic_, qos_lidar,
       std::bind(&LIVMapper::ImageCbk, this, std::placeholders::_1));
 
   // Core publishers (always needed)
@@ -426,6 +426,7 @@ void LIVMapper::HandleVIO()
 
   if (imu_prop_enable_)
   {
+    std::lock_guard<std::mutex> lock(mtx_buffer_imu_prop_);
     ekf_finish_once_ = true;
     latest_ekf_state_ = state_;
     latest_ekf_time_ = Lidar_measures_.last_lio_update_time;
@@ -505,6 +506,7 @@ void LIVMapper::HandleLIO()
 
   if (imu_prop_enable_)
   {
+    std::lock_guard<std::mutex> lock(mtx_buffer_imu_prop_);
     ekf_finish_once_ = true;
     latest_ekf_state_ = state_;
     latest_ekf_time_ = Lidar_measures_.last_lio_update_time;
@@ -734,10 +736,11 @@ void LIVMapper::SavePCD()
 // 主函数
 void LIVMapper::Run()
 {
+  std::thread spin_thread([this]() { rclcpp::spin(node_); });
+
   rclcpp::Rate rate(5000);
   while (rclcpp::ok())
   {
-    rclcpp::spin_some(node_);
     if (!SyncPackages(Lidar_measures_))
     {
       rate.sleep();
@@ -750,6 +753,9 @@ void LIVMapper::Run()
     StateEstimationAndMapping();
   }
   SavePCD();
+
+  if (spin_thread.joinable())
+    spin_thread.join();
 }
 
 void LIVMapper::PropImuOnce(StatesGroup &imu_prop_state, const double dt,
@@ -779,11 +785,11 @@ void LIVMapper::PropImuOnce(StatesGroup &imu_prop_state, const double dt,
 
 void LIVMapper::ImuPropCallback()
 {
-  if (p_imu_->imu_need_init_ || !new_imu_ || !ekf_finish_once_)
+  if (p_imu_->imu_need_init_ || !new_imu_.load() || !ekf_finish_once_.load())
     return;
   
   mtx_buffer_imu_prop_.lock();
-  new_imu_ = false; // 控制propagate频率和IMU频率一致
+  new_imu_.store(false);
   if (imu_prop_enable_ && !prop_imu_buffer_.empty())
   {
     static double last_t_from_lidar_end_time = 0;
@@ -1083,7 +1089,7 @@ void LIVMapper::ImuCbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
       prop_imu_buffer_.push_back(*msg);
     }
     newest_imu_ = *msg;
-    new_imu_ = true;
+    new_imu_.store(true);
     mtx_buffer_imu_prop_.unlock();
   }
   sig_buffer_.notify_all();

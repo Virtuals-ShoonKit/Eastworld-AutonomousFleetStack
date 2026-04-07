@@ -49,7 +49,7 @@
       b_gyr_cov: 0.0001  # lowered: stabilise gyro bias estimate during fast yaw
 
     lio:
-      max_iterations: 8   # more headroom for IESKF convergence after large rotation
+      max_iterations: 6   # reduced from 8: less spin starvation while retaining convergence headroom
       dept_err: 0.02
       beam_err: 0.15
       min_eigen_value: 0.005

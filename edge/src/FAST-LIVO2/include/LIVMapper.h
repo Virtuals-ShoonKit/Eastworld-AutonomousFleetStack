@@ -13,6 +13,9 @@ which is included as part of this source code package.
 #ifndef LIV_MAPPER_H
 #define LIV_MAPPER_H
 
+#include <atomic>
+#include <thread>
+
 #include <rclcpp/rclcpp.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
@@ -111,8 +114,10 @@ class LIVMapper {
 
   StatesGroup imu_propagate_, latest_ekf_state_;
 
-  bool new_imu_ = false, state_update_flg_ = false, imu_prop_enable_ = true,
-       ekf_finish_once_ = false;
+  std::atomic<bool> new_imu_{false};
+  std::atomic<bool> state_update_flg_{false};
+  bool imu_prop_enable_ = true;
+  std::atomic<bool> ekf_finish_once_{false};
   deque<sensor_msgs::msg::Imu> prop_imu_buffer_;
   sensor_msgs::msg::Imu newest_imu_;
   double latest_ekf_time_;

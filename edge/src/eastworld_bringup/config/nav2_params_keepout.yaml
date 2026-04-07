@@ -268,7 +268,7 @@ local_costmap:
         pointcloud:
           data_type: PointCloud2
           topic: /cloud_registered
-          sensor_frame: base_link
+          sensor_frame: map
           marking: true
           clearing: true
           obstacle_range: 5.0
@@ -329,7 +329,7 @@ global_costmap:
         pointcloud:
           data_type: PointCloud2
           topic: /cloud_registered
-          sensor_frame: base_link
+          sensor_frame: map
           marking: true
           clearing: true
           obstacle_range: 10.0

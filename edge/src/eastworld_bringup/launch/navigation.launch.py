@@ -16,7 +16,7 @@ import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node, SetRemap, PushRosNamespace
+from launch_ros.actions import Node, SetRemap
 from ament_index_python.packages import get_package_share_directory
 
 
@@ -36,6 +36,12 @@ def generate_launch_description():
         description="Automatically start Nav2 lifecycle nodes",
     )
 
+    map_yaml_arg = DeclareLaunchArgument(
+        "map",
+        default_value=os.path.join(bringup_dir, "maps", "office_map.yaml"),
+        description="Full path to 2D occupancy map YAML for map_server",
+    )
+
     log_level_arg = DeclareLaunchArgument(
         "log_level",
         default_value="warn",
@@ -48,6 +54,20 @@ def generate_launch_description():
     nav2_nodes = GroupAction(
         actions=[
             SetRemap(src="/cmd_vel", dst="/cmd_vel_nav"),
+
+            Node(
+                package="nav2_map_server",
+                executable="map_server",
+                name="map_server",
+                output="screen",
+                respawn=True,
+                respawn_delay=2.0,
+                parameters=[
+                    params_file,
+                    {"yaml_filename": LaunchConfiguration("map")},
+                ],
+                arguments=["--ros-args", "--log-level", log_level],
+            ),
 
             Node(
                 package="nav2_controller",
@@ -126,6 +146,7 @@ def generate_launch_description():
     return LaunchDescription([
         params_file_arg,
         autostart_arg,
+        map_yaml_arg,
         log_level_arg,
         nav2_nodes,
     ])

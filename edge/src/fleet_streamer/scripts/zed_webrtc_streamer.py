@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import signal
+import sys
 import threading
 from pathlib import Path
 
@@ -90,6 +91,7 @@ class ZedWebRTCStreamer:
         self._answer_received = False
         self._last_offer_sdp: str | None = None
         self._pipeline_error: asyncio.Event | None = None
+        self._cuda_fatal = False
 
     # -- pipeline -----------------------------------------------------------
 
@@ -206,6 +208,9 @@ class ZedWebRTCStreamer:
             err, dbg = message.parse_error()
             src_name = message.src.get_name() if message.src else "unknown"
             log.error("Pipeline bus ERROR from %s: %s (%s)", src_name, err, dbg)
+            err_str = str(err) + " " + str(dbg)
+            if "CUDA" in err_str or "cudaError" in err_str:
+                self._cuda_fatal = True
             if self._pipeline_error is not None:
                 self._loop.call_soon_threadsafe(self._pipeline_error.set)
         elif message.type == Gst.MessageType.WARNING:
@@ -345,6 +350,12 @@ class ZedWebRTCStreamer:
                 self.stop_pipeline()
                 self.ws = None
                 self._pipeline_error = None
+            if self._cuda_fatal:
+                log.error(
+                    "Fatal CUDA error detected — CUDA context is irrecoverably "
+                    "corrupted.  Exiting so the launcher can respawn a fresh process."
+                )
+                sys.exit(1)
             log.info("Waiting %.1fs before restart …", restart_delay)
             await asyncio.sleep(restart_delay)
             restart_delay = min(restart_delay * 1.5, _MAX_RESTART_DELAY)

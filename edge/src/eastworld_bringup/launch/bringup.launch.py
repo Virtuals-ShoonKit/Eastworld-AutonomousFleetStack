@@ -9,6 +9,7 @@ Launches the full stack in one command:
   4. Scout Mini base driver (CAN motor control, /cmd_vel, /scout_odom)
   5. Fleet streamer        (optional: ZED WebRTC + pose/cloud bridges to host)
   6. RViz2 (optional)
+  7. Foxglove Bridge       (auto when RViz is off — connect from ws://<jetson-ip>:8765)
 Usage:
   ros2 launch eastworld_bringup bringup.launch.py
   ros2 launch eastworld_bringup bringup.launch.py use_rviz:=false use_scout_base:=false
@@ -263,6 +264,29 @@ def generate_launch_description():
         ],
     )
 
+    # ── 7. Foxglove Bridge (when RViz is off — remote visualization) ──
+    foxglove_port_arg = DeclareLaunchArgument(
+        "foxglove_port",
+        default_value="8765",
+        description="WebSocket port for Foxglove Bridge",
+    )
+
+    foxglove_bridge = Node(
+        condition=UnlessCondition(LaunchConfiguration("use_rviz")),
+        package="foxglove_bridge",
+        executable="foxglove_bridge",
+        name="foxglove_bridge",
+        output="screen",
+        additional_env=NODE_ENV,
+        parameters=[{
+            "port": LaunchConfiguration("foxglove_port"),
+            "address": "0.0.0.0",
+            "send_buffer_limit": 10000000,
+            "use_sim_time": False,
+        }],
+        arguments=["--ros-args", "--log-level", LaunchConfiguration("stack_log_level")],
+    )
+
     # ── Compose ───────────────────────────────────────────────────────
     return LaunchDescription([
         use_rviz_arg,
@@ -275,6 +299,7 @@ def generate_launch_description():
         use_fleet_streaming_arg,
         robot_id_arg,
         host_url_arg,
+        foxglove_port_arg,
         livox_driver,
         fast_livo2,
         robot_state_publisher,
@@ -284,4 +309,5 @@ def generate_launch_description():
         scout_base_node,
         fleet_streamer_launch,
         rviz2,
+        foxglove_bridge,
     ])
