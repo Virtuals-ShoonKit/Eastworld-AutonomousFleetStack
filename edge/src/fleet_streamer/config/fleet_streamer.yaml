@@ -10,7 +10,7 @@ fleet_streamer:
     # Match a mode your camera supports (ZED-M: HD720 is typical). Only one process may open the ZED (not zed_node + zedsrc).
     camera_resolution: 5        # 0=HD2K, 1=HD1080, 3=HD720, 5=VGA
     camera_fps: 30
-    stream_type: 0              # 0=Left BGRA
+    stream_type: -1             # -1=Auto (GPU-direct RGBA on Jetson, NV12 zero-copy on GMSL)
     bitrate: 1500000            # H.264 bitrate (bps)
     iframeinterval: 30          # GOP size (keyframe every N frames)
     idrinterval: 30             # IDR cadence; shorter recovers faster after loss

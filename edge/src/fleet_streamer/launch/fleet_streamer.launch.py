@@ -58,6 +58,7 @@ def generate_launch_description():
         name="zed_webrtc_streamer",
         respawn=True,
         respawn_delay=10.0,
+        respawn_max_retries=5,
     )
 
     pose_bridge = Node(

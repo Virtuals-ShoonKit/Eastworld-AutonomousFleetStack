@@ -118,7 +118,7 @@ class ZedWebRTCStreamer:
         return bool(value)
 
     def _build_pipeline(self):
-        stream_type = self._cfg_int("stream_type", 0, minimum=0)
+        stream_type = self._cfg_int("stream_type", -1, minimum=-1)
         resolution = self._cfg_int("camera_resolution", 3, minimum=0)
         fps = self._cfg_int("camera_fps", 30, minimum=1)
         bitrate = self._cfg_int("bitrate", 2_000_000, minimum=1)
@@ -134,7 +134,7 @@ class ZedWebRTCStreamer:
         desc = (
             f"zedsrc stream-type={stream_type} camera-resolution={resolution} camera-fps={fps} "
             f"! queue max-size-buffers={queue_max_buffers + 1} max-size-bytes=0 max-size-time=0 "
-            "! nvvideoconvert "
+            "! nvvideoconvert nvbuf-memory-type=4 "
             "! video/x-raw(memory:NVMM),format=NV12 "
             f"! queue leaky={queue_leaky} max-size-buffers={queue_max_buffers} max-size-bytes=0 max-size-time=0 "
             f"! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} idrinterval={idr} "
