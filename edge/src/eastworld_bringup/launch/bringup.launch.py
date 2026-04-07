@@ -14,6 +14,7 @@ Usage:
   ros2 launch eastworld_bringup bringup.launch.py
   ros2 launch eastworld_bringup bringup.launch.py use_rviz:=false use_scout_base:=false
   ros2 launch eastworld_bringup bringup.launch.py use_fleet_streaming:=true robot_id:=robot_0 host_url:=ws://192.168.1.100:8800
+  ros2 launch eastworld_bringup bringup.launch.py use_fleet_streaming:=true use_zed_streaming:=false
 """
 
 import os
@@ -230,6 +231,11 @@ def generate_launch_description():
         default_value="true",
         description="Launch fleet streaming bridge (ZED WebRTC, pose, cloud to host)",
     )
+    use_zed_streaming_arg = DeclareLaunchArgument(
+        "use_zed_streaming",
+        default_value="true",
+        description="Launch ZED WebRTC process within fleet streamer",
+    )
     robot_id_arg = DeclareLaunchArgument(
         "robot_id", default_value=default_robot_id,
         description="Unique robot identifier for fleet management",
@@ -247,6 +253,7 @@ def generate_launch_description():
         launch_arguments={
             "robot_id": LaunchConfiguration("robot_id"),
             "host_url": LaunchConfiguration("host_url"),
+            "use_zed_streaming": LaunchConfiguration("use_zed_streaming"),
         }.items(),
     )
 
@@ -297,6 +304,7 @@ def generate_launch_description():
         use_relocalize_arg,
         map_pcd_path_arg,
         use_fleet_streaming_arg,
+        use_zed_streaming_arg,
         robot_id_arg,
         host_url_arg,
         foxglove_port_arg,

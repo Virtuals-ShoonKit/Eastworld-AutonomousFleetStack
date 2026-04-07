@@ -4,6 +4,7 @@ import os
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -45,6 +46,10 @@ def generate_launch_description():
         "fleet_config", default_value=default_config,
         description="Path to fleet_streamer config YAML",
     )
+    use_zed_streaming_arg = DeclareLaunchArgument(
+        "use_zed_streaming", default_value="true",
+        description="Launch ZED WebRTC streamer process",
+    )
 
     zed_webrtc = ExecuteProcess(
         cmd=[
@@ -54,11 +59,11 @@ def generate_launch_description():
             "--host-url", LaunchConfiguration("host_url"),
             "--config", LaunchConfiguration("fleet_config"),
         ],
+        condition=IfCondition(LaunchConfiguration("use_zed_streaming")),
         output="screen",
         name="zed_webrtc_streamer",
         respawn=True,
         respawn_delay=10.0,
-        respawn_max_retries=5,
     )
 
     pose_bridge = Node(
@@ -107,6 +112,7 @@ def generate_launch_description():
         robot_id_arg,
         host_url_arg,
         config_arg,
+        use_zed_streaming_arg,
         zed_webrtc,
         pose_bridge,
         cloud_bridge,

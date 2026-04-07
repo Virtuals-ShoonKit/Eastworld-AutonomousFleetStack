@@ -134,7 +134,7 @@ class ZedWebRTCStreamer:
         desc = (
             f"zedsrc stream-type={stream_type} camera-resolution={resolution} camera-fps={fps} "
             f"! queue max-size-buffers={queue_max_buffers + 1} max-size-bytes=0 max-size-time=0 "
-            "! nvvideoconvert nvbuf-memory-type=4 "
+            "! nvvideoconvert compute-hw=1 nvbuf-memory-type=4 "
             "! video/x-raw(memory:NVMM),format=NV12 "
             f"! queue leaky={queue_leaky} max-size-buffers={queue_max_buffers} max-size-bytes=0 max-size-time=0 "
             f"! nvv4l2h264enc bitrate={bitrate} iframeinterval={gop} idrinterval={idr} "

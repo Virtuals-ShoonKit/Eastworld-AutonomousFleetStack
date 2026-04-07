@@ -152,7 +152,7 @@ class LIVMapper {
   double plot_time_;
   int frame_cnt_;
   double img_time_offset_ = 0.0;
-  static constexpr size_t MAX_LIDAR_BUFFER_SIZE_ = 20;
+  static constexpr size_t MAX_LIDAR_BUFFER_SIZE_ = 100;
   deque<PointCloudXYZIN::Ptr> lid_raw_data_buffer_;
   deque<double> lid_header_time_buffer_;
   deque<sensor_msgs::msg::Imu::SharedPtr> imu_buffer_;

@@ -252,10 +252,10 @@ class TelemBridge(Node):
             self._pending = packed
             ws = self._ws
             loop = self._async_loop
-            should_schedule = not self._drain_scheduled
+            should_schedule = bool(loop and _ws_is_open(ws) and not self._drain_scheduled)
             if should_schedule:
                 self._drain_scheduled = True
-        if _ws_is_open(ws) and loop and should_schedule:
+        if should_schedule:
             asyncio.run_coroutine_threadsafe(self._drain(), loop)
 
     async def _drain(self):
@@ -272,9 +272,15 @@ class TelemBridge(Node):
             self._drain_scheduled = False
 
     def set_ws(self, ws, loop):
+        schedule_drain = False
         with self._ws_lock:
             self._ws = ws
             self._async_loop = loop
+            if ws is not None and self._pending is not None and not self._drain_scheduled:
+                self._drain_scheduled = True
+                schedule_drain = True
+        if schedule_drain:
+            asyncio.run_coroutine_threadsafe(self._drain(), loop)
 
 
 async def ws_connect_loop(node: TelemBridge):

@@ -279,8 +279,9 @@ void LIVMapper::InitializeFiles()
 void LIVMapper::InitializeSubscribersAndPublishers()
 {
   auto qos_small = rclcpp::QoS(rclcpp::KeepLast(10));
-  auto qos = rclcpp::QoS(rclcpp::KeepLast(5));
-  auto qos_lidar = rclcpp::QoS(rclcpp::KeepLast(20));
+  // Keep a deeper queue to avoid LiDAR burst drops under transient load.
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(100));
+  auto qos_lidar = rclcpp::QoS(rclcpp::KeepLast(100));
   auto qos_imu = rclcpp::QoS(rclcpp::KeepLast(400));
 
   // Subscribers
