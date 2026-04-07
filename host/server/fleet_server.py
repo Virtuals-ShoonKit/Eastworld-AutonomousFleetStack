@@ -65,6 +65,10 @@ async def handle_robot_ws(request: web.Request) -> web.WebSocketResponse:
                     _d = _mp.unpackb(data[1:], raw=False)
                     session.battery_voltage = _d.get("v")
                     session.battery_pct = _d.get("p")
+                    session.cpu_pct = _d.get("c")
+                    session.gpu_pct = _d.get("g")
+                    session.mem_used_mb = _d.get("mu")
+                    session.mem_total_mb = _d.get("mt")
                 await relay.broadcast(data)
 
             elif msg.type == web.WSMsgType.TEXT:

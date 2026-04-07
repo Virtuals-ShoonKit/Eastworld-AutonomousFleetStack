@@ -136,13 +136,26 @@ class TelemetryMsg:
     robot_id: str
     battery_voltage: float
     battery_pct: int  # 0-100, derived from voltage
+    cpu_pct: Optional[float] = None
+    gpu_pct: Optional[float] = None
+    mem_used_mb: Optional[int] = None
+    mem_total_mb: Optional[int] = None
 
     def pack(self) -> bytes:
-        payload = msgpack.packb({
+        d: dict = {
             "r": self.robot_id,
             "v": self.battery_voltage,
             "p": self.battery_pct,
-        })
+        }
+        if self.cpu_pct is not None:
+            d["c"] = self.cpu_pct
+        if self.gpu_pct is not None:
+            d["g"] = self.gpu_pct
+        if self.mem_used_mb is not None:
+            d["mu"] = self.mem_used_mb
+        if self.mem_total_mb is not None:
+            d["mt"] = self.mem_total_mb
+        payload = msgpack.packb(d)
         return struct.pack("B", MsgType.TELEMETRY) + payload
 
     @classmethod
@@ -152,6 +165,10 @@ class TelemetryMsg:
             robot_id=d["r"],
             battery_voltage=d["v"],
             battery_pct=d["p"],
+            cpu_pct=d.get("c"),
+            gpu_pct=d.get("g"),
+            mem_used_mb=d.get("mu"),
+            mem_total_mb=d.get("mt"),
         )
 
 

@@ -5,6 +5,8 @@ ROS 2 ScoutStatus -> WebSocket telemetry bridge.
 Subscribes to /scout_status, extracts battery voltage, maps it to a
 percentage (7S Li-ion: ~22 V empty, ~29.4 V full), and streams compact
 TELEMETRY messages to the host fleet server at ~1 Hz.
+
+Optionally reads CPU/GPU/memory stats via jetson-stats (jtop) if available.
 """
 
 from __future__ import annotations
@@ -35,6 +37,94 @@ from protocol import TelemetryMsg  # noqa: E402
 # Scout Mini 7S Li-ion pack voltage range
 _BATT_V_MIN = 22.0
 _BATT_V_MAX = 29.4
+
+
+class JetsonMonitor:
+    """Background jtop reader -- provides CPU/GPU/memory snapshots.
+
+    Falls back gracefully to no-op if jetson-stats is not installed or
+    the jtop service is unreachable (e.g. running on a non-Jetson host).
+    """
+
+    def __init__(self, logger=None):
+        self._lock = threading.Lock()
+        self._cpu_pct: float = 0.0
+        self._gpu_pct: float = 0.0
+        self._mem_used_mb: int = 0
+        self._mem_total_mb: int = 0
+        self._available = False
+        self._log = logger
+
+        t = threading.Thread(target=self._loop, daemon=True)
+        t.start()
+
+    def _loop(self) -> None:
+        try:
+            from jtop import jtop  # type: ignore[import-untyped]
+        except ImportError:
+            if self._log:
+                self._log.warn(
+                    "jetson-stats not installed -- system stats disabled"
+                )
+            return
+
+        try:
+            with jtop(interval=1.0) as jetson:
+                self._available = True
+                if self._log:
+                    self._log.info("JetsonMonitor: jtop connected")
+                while jetson.ok():
+                    self._update(jetson)
+        except Exception as exc:
+            if self._log:
+                self._log.warn(f"JetsonMonitor error: {exc}")
+
+    def _update(self, jetson) -> None:
+        try:
+            stats = jetson.stats
+
+            cpu_keys = [
+                k for k in stats if k.startswith("CPU") and k[3:].isdigit()
+            ]
+            cpu_vals = [stats[k] for k in cpu_keys if isinstance(stats[k], (int, float))]
+            cpu = round(sum(cpu_vals) / max(len(cpu_vals), 1), 1) if cpu_vals else 0.0
+
+            gpu = float(stats.get("GPU", 0))
+
+            mem = getattr(jetson, "memory", None) or {}
+            ram = mem.get("RAM", {})
+            if isinstance(ram, dict):
+                used = ram.get("used", 0)
+                total = ram.get("total", 0)
+            else:
+                used = total = 0
+            # jtop reports bytes on some versions, kB on others
+            used_mb = int(used / 1024) if used > 100_000 else int(used)
+            total_mb = int(total / 1024) if total > 100_000 else int(total)
+
+            with self._lock:
+                self._cpu_pct = cpu
+                self._gpu_pct = gpu
+                self._mem_used_mb = used_mb
+                self._mem_total_mb = total_mb
+        except Exception:
+            pass
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    def snapshot(self) -> dict | None:
+        """Return latest stats dict, or None if jtop is not running."""
+        if not self._available:
+            return None
+        with self._lock:
+            return {
+                "cpu_pct": self._cpu_pct,
+                "gpu_pct": self._gpu_pct,
+                "mem_used_mb": self._mem_used_mb,
+                "mem_total_mb": self._mem_total_mb,
+            }
 
 
 def _voltage_to_pct(voltage: float) -> int:
@@ -75,6 +165,8 @@ class TelemBridge(Node):
         self._ws_lock = threading.Lock()
         self._async_loop: asyncio.AbstractEventLoop | None = None
 
+        self._jetson = JetsonMonitor(logger=self.get_logger())
+
         try:
             from scout_msgs.msg import ScoutStatus
             self._msg_type = ScoutStatus
@@ -103,10 +195,15 @@ class TelemBridge(Node):
         voltage = float(msg.battery_voltage)
         pct = _voltage_to_pct(voltage)
 
+        js = self._jetson.snapshot()
         telem = TelemetryMsg(
             robot_id=self.robot_id,
             battery_voltage=round(voltage, 2),
             battery_pct=pct,
+            cpu_pct=js["cpu_pct"] if js else None,
+            gpu_pct=js["gpu_pct"] if js else None,
+            mem_used_mb=js["mem_used_mb"] if js else None,
+            mem_total_mb=js["mem_total_mb"] if js else None,
         )
         packed = telem.pack()
 

@@ -33,6 +33,10 @@ export interface TelemetryData {
   r: string; // robot_id
   v: number; // battery_voltage
   p: number; // battery_pct (0-100)
+  c?: number; // cpu_pct
+  g?: number; // gpu_pct
+  mu?: number; // mem_used_mb
+  mt?: number; // mem_total_mb
 }
 
 export interface FleetState {
@@ -44,6 +48,10 @@ export interface FleetState {
     alive: boolean;
     battery_voltage: number | null;
     battery_pct: number | null;
+    cpu_pct: number | null;
+    gpu_pct: number | null;
+    mem_used_mb: number | null;
+    mem_total_mb: number | null;
   }>;
 }
 

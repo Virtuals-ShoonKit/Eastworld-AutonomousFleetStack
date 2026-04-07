@@ -13,6 +13,10 @@ export interface RobotState {
   lastUpdateMs: number;
   battery_voltage: number | null;
   battery_pct: number | null;
+  cpu_pct: number | null;
+  gpu_pct: number | null;
+  mem_used_mb: number | null;
+  mem_total_mb: number | null;
 }
 
 export function useFleetSocket(url: string) {
@@ -58,6 +62,10 @@ export function useFleetSocket(url: string) {
               lastUpdateMs: now,
               battery_voltage: existing?.battery_voltage ?? null,
               battery_pct: existing?.battery_pct ?? null,
+              cpu_pct: existing?.cpu_pct ?? null,
+              gpu_pct: existing?.gpu_pct ?? null,
+              mem_used_mb: existing?.mem_used_mb ?? null,
+              mem_total_mb: existing?.mem_total_mb ?? null,
             });
             return next;
           });
@@ -77,6 +85,10 @@ export function useFleetSocket(url: string) {
               lastUpdateMs: now,
               battery_voltage: existing?.battery_voltage ?? null,
               battery_pct: existing?.battery_pct ?? null,
+              cpu_pct: existing?.cpu_pct ?? null,
+              gpu_pct: existing?.gpu_pct ?? null,
+              mem_used_mb: existing?.mem_used_mb ?? null,
+              mem_total_mb: existing?.mem_total_mb ?? null,
             });
             return next;
           });
@@ -91,6 +103,10 @@ export function useFleetSocket(url: string) {
                 ...existing,
                 battery_voltage: telem.v,
                 battery_pct: telem.p,
+                cpu_pct: telem.c ?? existing.cpu_pct,
+                gpu_pct: telem.g ?? existing.gpu_pct,
+                mem_used_mb: telem.mu ?? existing.mem_used_mb,
+                mem_total_mb: telem.mt ?? existing.mem_total_mb,
               });
             }
             return next;
@@ -107,6 +123,10 @@ export function useFleetSocket(url: string) {
                 ...r,
                 battery_voltage: r.battery_voltage ?? existing?.battery_voltage ?? null,
                 battery_pct: r.battery_pct ?? existing?.battery_pct ?? null,
+                cpu_pct: r.cpu_pct ?? existing?.cpu_pct ?? null,
+                gpu_pct: r.gpu_pct ?? existing?.gpu_pct ?? null,
+                mem_used_mb: r.mem_used_mb ?? existing?.mem_used_mb ?? null,
+                mem_total_mb: r.mem_total_mb ?? existing?.mem_total_mb ?? null,
                 pose: existing?.pose ?? null,
                 lastUpdateMs: existing?.lastUpdateMs ?? now,
               });

@@ -34,6 +34,80 @@ function BatteryIcon({ pct, voltage }: { pct: number | null; voltage: number | n
   );
 }
 
+function UsageBar({ label, pct, color, detail }: {
+  label: string;
+  pct: number | null;
+  color: string;
+  detail?: string;
+}) {
+  const available = pct !== null;
+  const value = available ? Math.max(0, Math.min(100, pct!)) : 0;
+  const barColor = !available ? "#333" : value > 85 ? "#ff4444" : value > 60 ? "#ffcc00" : color;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+      <span style={{
+        fontSize: 9,
+        color: "#888",
+        fontFamily: "monospace",
+        fontWeight: 600,
+        width: 28,
+        flexShrink: 0,
+      }}>
+        {label}
+      </span>
+      <div style={{
+        flex: 1,
+        height: 6,
+        background: "#1e1e2e",
+        borderRadius: 3,
+        overflow: "hidden",
+        border: "1px solid #2a2a3a",
+      }}>
+        {available && (
+          <div style={{
+            width: `${value}%`,
+            height: "100%",
+            background: barColor,
+            borderRadius: 3,
+            transition: "width 0.4s ease",
+          }} />
+        )}
+      </div>
+      <span style={{
+        fontSize: 9,
+        color: available ? "#aaa" : "#555",
+        fontFamily: "monospace",
+        width: detail ? 62 : 30,
+        textAlign: "right",
+        flexShrink: 0,
+      }}>
+        {available ? (detail ?? `${Math.round(value)}%`) : "—"}
+      </span>
+    </div>
+  );
+}
+
+function JetsonStats({ robot }: { robot: RobotState }) {
+  const hasStats = robot.cpu_pct !== null;
+  if (!hasStats) return null;
+
+  const memPct = (robot.mem_used_mb != null && robot.mem_total_mb != null && robot.mem_total_mb > 0)
+    ? (robot.mem_used_mb / robot.mem_total_mb) * 100
+    : null;
+  const memDetail = (robot.mem_used_mb != null && robot.mem_total_mb != null)
+    ? `${(robot.mem_used_mb / 1024).toFixed(1)}/${(robot.mem_total_mb / 1024).toFixed(1)}G`
+    : undefined;
+
+  return (
+    <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #222" }}>
+      <UsageBar label="CPU" pct={robot.cpu_pct} color="#00aaff" />
+      <UsageBar label="GPU" pct={robot.gpu_pct} color="#aa66ff" />
+      <UsageBar label="MEM" pct={memPct} color="#00cc88" detail={memDetail} />
+    </div>
+  );
+}
+
 export function FleetSidebar({ robots }: Props) {
   const entries = Array.from(robots.values());
 
@@ -86,6 +160,7 @@ export function FleetSidebar({ robots }: Props) {
           )}
 
           <BatteryIcon pct={robot.battery_pct} voltage={robot.battery_voltage} />
+          <JetsonStats robot={robot} />
         </div>
       ))}
     </div>

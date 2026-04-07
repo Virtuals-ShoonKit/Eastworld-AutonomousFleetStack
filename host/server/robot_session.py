@@ -20,6 +20,12 @@ class RobotSession:
     battery_voltage: float | None = None
     battery_pct: int | None = None
 
+    # Jetson system stats (updated via TELEMETRY messages)
+    cpu_pct: float | None = None
+    gpu_pct: float | None = None
+    mem_used_mb: int | None = None
+    mem_total_mb: int | None = None
+
     def touch(self):
         self.last_heartbeat = time.time()
 
@@ -35,4 +41,8 @@ class RobotSession:
             "alive": self.is_alive(),
             "battery_voltage": self.battery_voltage,
             "battery_pct": self.battery_pct,
+            "cpu_pct": self.cpu_pct,
+            "gpu_pct": self.gpu_pct,
+            "mem_used_mb": self.mem_used_mb,
+            "mem_total_mb": self.mem_total_mb,
         }
