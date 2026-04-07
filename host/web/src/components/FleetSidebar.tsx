@@ -89,9 +89,6 @@ function UsageBar({ label, pct, color, detail }: {
 }
 
 function JetsonStats({ robot }: { robot: RobotState }) {
-  const hasStats = robot.cpu_pct !== null;
-  if (!hasStats) return null;
-
   const memPct = (robot.mem_used_mb != null && robot.mem_total_mb != null && robot.mem_total_mb > 0)
     ? (robot.mem_used_mb / robot.mem_total_mb) * 100
     : null;
