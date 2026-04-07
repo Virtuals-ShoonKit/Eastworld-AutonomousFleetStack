@@ -203,6 +203,8 @@ class TelemBridge(Node):
         self._ws = None
         self._ws_lock = threading.Lock()
         self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._pending: bytes | None = None
+        self._drain_scheduled = False
 
         self._jetson = JetsonMonitor(logger=self.get_logger())
 
@@ -247,10 +249,27 @@ class TelemBridge(Node):
         packed = telem.pack()
 
         with self._ws_lock:
+            self._pending = packed
             ws = self._ws
             loop = self._async_loop
-        if _ws_is_open(ws) and loop:
-            asyncio.run_coroutine_threadsafe(ws.send(packed), loop)
+            should_schedule = not self._drain_scheduled
+            if should_schedule:
+                self._drain_scheduled = True
+        if _ws_is_open(ws) and loop and should_schedule:
+            asyncio.run_coroutine_threadsafe(self._drain(), loop)
+
+    async def _drain(self):
+        with self._ws_lock:
+            data = self._pending
+            self._pending = None
+            ws = self._ws
+        if data and _ws_is_open(ws):
+            try:
+                await ws.send(data)
+            except Exception:
+                pass
+        with self._ws_lock:
+            self._drain_scheduled = False
 
     def set_ws(self, ws, loop):
         with self._ws_lock:

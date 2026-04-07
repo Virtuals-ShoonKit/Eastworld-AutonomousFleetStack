@@ -68,6 +68,9 @@ class PoseBridge(Node):
 
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._ws_lock = threading.Lock()
+        self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._pending: bytes | None = None
+        self._drain_scheduled = False
 
         self._timer = self.create_timer(1.0 / rate_hz, self._on_timer)
         self.get_logger().info(
@@ -94,9 +97,27 @@ class PoseBridge(Node):
         packed = msg.pack()
 
         with self._ws_lock:
+            self._pending = packed
             ws = self._ws
-        if _ws_is_open(ws):
-            asyncio.run_coroutine_threadsafe(ws.send(packed), self._async_loop)
+            loop = self._async_loop
+            should_schedule = not self._drain_scheduled
+            if should_schedule:
+                self._drain_scheduled = True
+        if _ws_is_open(ws) and loop and should_schedule:
+            asyncio.run_coroutine_threadsafe(self._drain(), loop)
+
+    async def _drain(self):
+        with self._ws_lock:
+            data = self._pending
+            self._pending = None
+            ws = self._ws
+        if data and _ws_is_open(ws):
+            try:
+                await ws.send(data)
+            except Exception:
+                pass
+        with self._ws_lock:
+            self._drain_scheduled = False
 
     def set_ws(self, ws, loop):
         with self._ws_lock:

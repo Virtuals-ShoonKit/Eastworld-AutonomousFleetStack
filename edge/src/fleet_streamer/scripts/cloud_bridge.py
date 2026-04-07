@@ -124,6 +124,8 @@ class CloudBridge(Node):
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._ws_lock = threading.Lock()
         self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._pending: bytes | None = None
+        self._drain_scheduled = False
 
         if self.use_zstd and zstd is None:
             self.get_logger().warn("zstandard not installed -- falling back to raw Draco")
@@ -147,9 +149,9 @@ class CloudBridge(Node):
         self.create_subscription(Bool, "/relocalization_status", self._on_reloc_status, reloc_qos)
 
         cloud_qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
-            depth=10,
+            depth=1,
         )
         self.create_subscription(PointCloud2, input_topic, self._on_cloud, cloud_qos)
         self.get_logger().info(
@@ -213,10 +215,27 @@ class CloudBridge(Node):
         packed = cloud_msg.pack()
 
         with self._ws_lock:
+            self._pending = packed
             ws = self._ws
             loop = self._async_loop
-        if _ws_is_open(ws) and loop:
-            asyncio.run_coroutine_threadsafe(ws.send(packed), loop)
+            should_schedule = not self._drain_scheduled
+            if should_schedule:
+                self._drain_scheduled = True
+        if _ws_is_open(ws) and loop and should_schedule:
+            asyncio.run_coroutine_threadsafe(self._drain(), loop)
+
+    async def _drain(self):
+        with self._ws_lock:
+            data = self._pending
+            self._pending = None
+            ws = self._ws
+        if data and _ws_is_open(ws):
+            try:
+                await ws.send(data)
+            except Exception:
+                pass
+        with self._ws_lock:
+            self._drain_scheduled = False
 
     def set_ws(self, ws, loop):
         with self._ws_lock:

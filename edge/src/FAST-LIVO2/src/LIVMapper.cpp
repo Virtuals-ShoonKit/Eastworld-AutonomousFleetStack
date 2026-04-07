@@ -279,7 +279,7 @@ void LIVMapper::InitializeFiles()
 void LIVMapper::InitializeSubscribersAndPublishers()
 {
   auto qos_small = rclcpp::QoS(rclcpp::KeepLast(10));
-  auto qos = rclcpp::QoS(rclcpp::KeepLast(100));
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(5));
   auto qos_lidar = rclcpp::QoS(rclcpp::KeepLast(20));
   auto qos_imu = rclcpp::QoS(rclcpp::KeepLast(400));
 
@@ -980,9 +980,11 @@ void LIVMapper::PointCloud2Cbk(const sensor_msgs::msg::PointCloud2::ConstSharedP
   lid_header_time_buffer_.push_back(toSec(msg->header.stamp));
   last_timestamp_lidar_ = toSec(msg->header.stamp);
 
-  while (lid_raw_data_buffer_.size() > MAX_LIDAR_BUFFER_SIZE_) {
-    lid_raw_data_buffer_.pop_front();
-    lid_header_time_buffer_.pop_front();
+  if (first_frame_finished_) {
+    while (lid_raw_data_buffer_.size() > MAX_LIDAR_BUFFER_SIZE_) {
+      lid_raw_data_buffer_.pop_front();
+      lid_header_time_buffer_.pop_front();
+    }
   }
 
   mtx_buffer_.unlock();
@@ -1025,9 +1027,11 @@ void LIVMapper::LivoxCbk(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr
   lid_header_time_buffer_.push_back(cur_head_time);
   last_timestamp_lidar_ = cur_head_time;
 
-  while (lid_raw_data_buffer_.size() > MAX_LIDAR_BUFFER_SIZE_) {
-    lid_raw_data_buffer_.pop_front();
-    lid_header_time_buffer_.pop_front();
+  if (first_frame_finished_) {
+    while (lid_raw_data_buffer_.size() > MAX_LIDAR_BUFFER_SIZE_) {
+      lid_raw_data_buffer_.pop_front();
+      lid_header_time_buffer_.pop_front();
+    }
   }
 
   mtx_buffer_.unlock();
@@ -1554,5 +1558,11 @@ void LIVMapper::PublishPath()
   msg_body_pose_.header.stamp = node_->now();
   msg_body_pose_.header.frame_id = "map";
   path_.poses.push_back(msg_body_pose_);
+
+  static constexpr size_t MAX_PATH_POSES = 3000;
+  if (path_.poses.size() > MAX_PATH_POSES)
+    path_.poses.erase(path_.poses.begin(),
+                      path_.poses.end() - MAX_PATH_POSES);
+
   pub_path_->publish(path_);
 }
